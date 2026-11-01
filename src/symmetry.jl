@@ -12,9 +12,10 @@
 #
 # solve! runs the check before every solve, in the workspace's memory, so it
 # sees h and J as they are at that moment, even if they were changed in place
-# after the problem was built. It costs one pass over the couplings: as much
-# as one to three layers (measured on an Apple M4, n = 1000 to 5000). The groups are found by union-find in `ws.group`, with
-# `ws.σ` as scratch for one flag byte per group.
+# after the problem was built. It costs one pass over the couplings, as much
+# as one to three steps of the algorithm (measured on an Apple M4, n = 1000
+# to 5000). The groups are found by union-find in `ws.group`, with `ws.σ` as
+# scratch for one flag byte per group.
 
 """
     _root!(parent, i) -> r

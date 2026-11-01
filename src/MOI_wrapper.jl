@@ -40,8 +40,8 @@ The model may contain binary variables, a linear or quadratic objective in
 either sense, and fixed variables (`fix(x[i], 1)`); nothing else. Options,
 set with `set_attribute(model, name, value)`:
 
-- `"p"`: number of layers of the linear schedule (default 1000);
-- `"tau"`: its time step (default 0.5);
+- `"p"`: the number of steps of the linear schedule (default 1000);
+- `"tau"`: its step size (default 0.5);
 - `"beta"`, `"gamma"`: an explicit [`Schedule`](@ref) as two vectors of equal
   length, used instead of the linear schedule when both are set.
 
@@ -412,7 +412,7 @@ function MOI.optimize!(o::Optimizer)
     sched = _schedule(o)
     x[free] .= solve(prob, sched).x
     _finish!(o, x, MOI.LOCALLY_SOLVED,
-             "MFAOA ran $(length(sched)) layers on $(length(free)) free variables.", start)
+             "MFAOA ran $(length(sched)) steps on $(length(free)) free variables.", start)
 end
 
 # --- results -----------------------------------------------------------------

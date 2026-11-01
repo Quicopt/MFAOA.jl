@@ -180,7 +180,7 @@ The unit in which the schedule measures the slope of the objective of `prob`.
 
 The algorithm moves each variable according to the slope of the objective in
 that variable, `m[i] = h[i] + Σⱼ J[i,j] z[j]`, where `z[j]`, between -1 and +1,
-is the current value of variable `j`. In layer `k`, the angle that this slope
+is the current value of variable `j`. In step `k`, the angle that this slope
 sets is `2γ[k] m[i] / s` (see [`Schedule`](@ref)). Unless `scale` was given
 when the problem was built, `s` is the root mean square of `m[i]` over all
 variables `i` and over random values ±1 of `z`:

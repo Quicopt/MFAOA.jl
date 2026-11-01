@@ -11,8 +11,8 @@ It accepts the problem either as a QUBO, `x' * Q * x + c' * x + constant` over
 `x ∈ {0,1}ⁿ` ([`QUBOProblem`](@ref)), or in the Ising form the algorithm works
 with natively, `h' * σ + Σ_{i<j} J[i,j] σ[i] σ[j]` over `σ ∈ {-1,+1}ⁿ`
 ([`IsingProblem`](@ref)). The matrices can be dense or sparse. Call
-[`solve`](@ref) with a [`Schedule`](@ref), or with the number of layers `p`
-and the time step `τ` of the default linear schedule. From JuMP, use
+[`solve`](@ref) with a [`Schedule`](@ref), or with the number of steps `p`
+and the step size `τ` of the default linear schedule. From JuMP, use
 `Model(MFAOA.Optimizer)` with binary variables and a quadratic objective.
 """
 module MFAOA

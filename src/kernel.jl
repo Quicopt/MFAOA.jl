@@ -1,16 +1,16 @@
-# kernel.jl — the mean-field AOA layer loop. Allocates nothing.
+# kernel.jl — the steps of the mean-field AOA. Allocates nothing.
 #
 # The problem is to minimize
 #
 #     E(σ) = Σᵢ hᵢ σᵢ + Σ_{i<j} Jᵢⱼ σᵢ σⱼ,     σᵢ = ±1,
 #
 # with J symmetric and zero on the diagonal. Each binary variable becomes a
-# classical unit spin nᵢ = (nˣ, nʸ, nᶻ), started at (1, 0, 0). Layer k rotates
-# every spin twice:
+# classical unit spin nᵢ = (nˣ, nʸ, nᶻ), started at (1, 0, 0). Step k (layer k
+# in the paper) rotates every spin twice:
 #
 #   1. about ẑ by the angle 2γₖ mᵢ / s, where mᵢ = hᵢ + Σⱼ Jᵢⱼ nⱼᶻ is the
 #      effective field spin i feels from the problem (one product of J with a
-#      vector per layer) and s is the problem's field scale;
+#      vector per step) and s is the problem's field scale;
 #   2. about x̂ by the angle 2βₖ Δᵢ, where Δᵢ > 0 is the driver strength.
 #
 # These are Eqs. 10–12 of Misra-Spieldenner et al., PRX Quantum 4, 030335
@@ -20,12 +20,12 @@
 # positive effective field mᵢ pushes nᵢᶻ negative, which lowers hᵢσᵢ.
 #
 # Two things enter the ẑ angle only as a common factor, so they cost one
-# scalar per layer instead of a rescaled or negated copy of the problem: the
+# scalar per step instead of a rescaled or negated copy of the problem: the
 # field scale s, which makes the dynamics independent of the units of the
 # objective, and the sense. Maximizing E is minimizing −E, whose field is −mᵢ,
 # so a maximization rotates by −2γₖ mᵢ / s.
 #
-# After the last layer, σᵢ = sign(nᵢᶻ). A spin that ends exactly on the
+# After the last step, σᵢ = sign(nᵢᶻ). A spin that ends exactly on the
 # equator takes the sign that improves the objective in its final field, and
 # +1 if that field vanishes too.
 #
@@ -95,7 +95,7 @@ end
 
 The effective field `m = h + J * z`, computed in place by `mul!`, so a dense
 `J` goes to BLAS and a sparse one to the sparse product. This is the one
-operation of each layer whose cost grows faster than `n`.
+operation of each step whose cost grows faster than `n`.
 """
 magnetization!(m::AbstractVector, h::AbstractVector, J::AbstractMatrix, z::AbstractVector) =
     mul!(copyto!(m, h), J, z, true, true)
@@ -150,7 +150,7 @@ _field_unit(prob::IsingProblem{T}) where {T} = _sense_sign(prob.sense, T) / prob
 """
     step!(ws::Workspace, prob::IsingProblem, β_k, γ_k) -> ws
 
-Apply one layer of the algorithm (see [`Schedule`](@ref)) to the vectors in
+Apply one step of the algorithm (see [`Schedule`](@ref)) to the vectors in
 `ws.state`. Compute the slope `m[i]` of the objective in every variable into
 `ws.m`. Then turn every vector `i` about the z axis by the angle
 `2γ_k * m[i] / s`, where `s` is the problem's [`fieldscale`](@ref) (the
@@ -166,7 +166,7 @@ end
 """
     evolve!(ws::Workspace, prob::IsingProblem, sched::Schedule) -> ws
 
-Run every layer of `sched` with [`step!`](@ref), starting from the vectors in
+Run every step of `sched` with [`step!`](@ref), starting from the vectors in
 `ws.state` as they are. Allocates nothing.
 """
 function evolve!(ws::Workspace, prob::IsingProblem, sched::Schedule)

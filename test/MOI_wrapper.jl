@@ -13,7 +13,7 @@ using LinearAlgebra: triu
     @test value.(x) == [0, 1, 1]
     @test objective_value(model) == -3
     @test solve_time(model) ≥ 0
-    @test occursin("layers", raw_status(model))
+    @test occursin("steps", raw_status(model))
 
     @objective(model, Max, -(2x[1] * x[2] - 3x[2] * x[3] - x[1] - x[2] + x[3]) + 1)
     optimize!(model)
@@ -167,19 +167,19 @@ end
     @test get_attribute(model, "tau") == 0.4
     optimize!(model)
     @test value.(x) == [1, 0]
-    @test occursin("200 layers", raw_status(model))
+    @test occursin("200 steps", raw_status(model))
 
     sched = linear_schedule(50, 0.5)
     set_attribute(model, "beta", sched.β)
     @test_throws ArgumentError optimize!(model)        # gamma missing
     set_attribute(model, "gamma", sched.γ)
     optimize!(model)
-    @test occursin("50 layers", raw_status(model))
+    @test occursin("50 steps", raw_status(model))
     @test get_attribute(model, "beta") == sched.β
     set_attribute(model, "beta", nothing)
     set_attribute(model, "gamma", nothing)
     optimize!(model)
-    @test occursin("200 layers", raw_status(model))
+    @test occursin("200 steps", raw_status(model))
 
     @test_throws ArgumentError set_attribute(model, "p", 0)
     @test_throws ArgumentError set_attribute(model, "tau", -1.0)

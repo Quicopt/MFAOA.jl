@@ -38,7 +38,7 @@ What [`solve`](@ref) returns.
 - `objective_mf`: the objective at the values between -1 and +1 that the
   algorithm ends with, before they are rounded to `σ`. It equals `objective`
   when every value has reached -1 or +1. A large gap means that variables
-  were still undecided at the end; more layers usually close it.
+  were still undecided at the end; more steps usually close it.
 - `state::SpinState`: the final vectors that represent the variables (see
   [`Schedule`](@ref)).
 """
@@ -74,8 +74,8 @@ end
     solve(prob; p = 1000, τ = 0.5) -> Result
 
 Solve the [`IsingProblem`](@ref) or [`QUBOProblem`](@ref) `prob` with the
-schedule `sched`, or with the [`linear_schedule`](@ref) of `p` layers and time
-step `τ`. The run is deterministic. See [`solve!`](@ref) for the
+schedule `sched`, or with the [`linear_schedule`](@ref) of `p` steps and step
+size `τ`. The run is deterministic. See [`solve!`](@ref) for the
 allocation-free form and [`Result`](@ref) for what comes back.
 """
 function solve(prob::IsingProblem{T}, sched::Schedule) where {T}
