@@ -106,27 +106,29 @@ end
 """
     IsingProblem(h, J; Δ = nothing, offset = 0, sense = :min, scale = nothing)
 
-A binary quadratic program in Ising form: minimize (or, with `sense = :max`,
-maximize)
+A binary quadratic program in Ising form, in variables `σ[i]` that are -1 or
++1: minimize (or, with `sense = :max`, maximize)
 
-    h' * σ + Σ_{i<j} J[i,j] σ[i] σ[j] + offset      over σ[i] ∈ {-1, +1}.
+    h' * σ + Σ_{i<j} J[i,j] σ[i] σ[j] + offset.
 
-`J` must be symmetric with a zero diagonal (`σ[i]^2 = 1` would turn a diagonal
-entry into a constant; put it into `offset`). It can be a dense `Matrix`, a
-`SparseMatrixCSC`, which is much faster when most couplings are zero, or any
-other matrix that `LinearAlgebra.mul!` can multiply with a vector, such as a
-`Symmetric` view. `h` and `J` are kept as they are, not copied, when their
-element type is already the problem's; changing them afterwards changes the
-problem.
+`J` must be symmetric with a zero diagonal. Since `σ[i]^2 = 1`, a diagonal
+entry would only add a constant; put it into `offset` instead. `J` can be a
+dense `Matrix`, a `SparseMatrixCSC`, which is much faster when most entries
+are zero, or any other matrix that `LinearAlgebra.mul!` can multiply with a
+vector, such as a `Symmetric` view. `h` and `J` are used as they are, without
+a copy, when their element type is already the problem's. Changing them
+afterwards changes the problem, except for its [`fieldscale`](@ref), which is
+computed when the problem is built.
 
-`Δ` are the per-variable driver strengths of the algorithm, all positive;
-`nothing` means `Δ[i] = 1` for all `i`, which is the usual choice and the
-faster code path.
+Two keywords tune the algorithm and rarely need to be set:
 
-`scale` is the unit in which the schedule measures fields; see
-[`fieldscale`](@ref). The default makes the solution independent of the units
-of the objective. Pass `scale = 1` to measure fields in the units of `h` and
-`J` themselves.
+- `Δ`: one positive factor per variable on the angles `β` of the
+  [`Schedule`](@ref). The default, `nothing`, means 1 for every variable and
+  takes a faster code path.
+- `scale`: the unit in which the schedule measures the slope of the
+  objective; see [`fieldscale`](@ref). The default makes the solution
+  independent of the units of `h` and `J`; `scale = 1` uses those units
+  themselves.
 """
 struct IsingProblem{T<:AbstractFloat,M<:AbstractMatrix{T},D<:Union{Nothing,Vector{T}}}
     h::Vector{T}
@@ -174,41 +176,29 @@ Base.eltype(::IsingProblem{T}) where {T} = T
 """
     fieldscale(prob::IsingProblem) -> s
 
-The unit in which the schedule measures fields for `prob`. In layer `k`,
-spin `i` turns about ẑ by the angle `2γ[k] m[i] / s`, where
-`m[i] = h[i] + Σⱼ J[i,j] zⱼ` is the field it feels. Unless set when the
-problem was built, `s` is the root mean square of that field over random
-spins,
+The unit in which the schedule measures the slope of the objective of `prob`.
+
+The algorithm moves each variable according to the slope of the objective in
+that variable, `m[i] = h[i] + Σⱼ J[i,j] z[j]`, where `z[j]`, between -1 and +1,
+is the current value of variable `j`. In layer `k`, the angle that this slope
+sets is `2γ[k] m[i] / s` (see [`Schedule`](@ref)). Unless `scale` was given
+when the problem was built, `s` is the root mean square of `m[i]` over all
+variables `i` and over random values ±1 of `z`:
 
     s = sqrt((Σᵢ hᵢ² + Σᵢⱼ Jᵢⱼ²) / n).
 
 Multiplying `h` and `J` by a constant multiplies `s` by the same constant, so
-the dynamics, and the solution, do not depend on the units of the objective.
+the algorithm, and the solution, do not depend on the units of the objective.
 """
 fieldscale(prob::IsingProblem) = prob.scale
 
 """
     objective(prob, σ)
 
-The problem's objective value at the spin configuration `σ` (entries ±1),
-in the sense the problem was stated in and including its constant offset.
+The objective value of `prob` at `σ`, a vector with entries -1 and +1,
+including the offset.
 """
 objective(prob::IsingProblem, σ::AbstractVector) = energy(prob.h, prob.J, σ) + prob.offset
-
-"""
-    isflipsymmetric(prob) -> Bool
-
-`true` when the objective is invariant under flipping all spins at once,
-`σ → -σ`, which is the case when all local fields `h` vanish (up to rounding
-relative to the size of `J`). The algorithm cannot solve such a problem: with
-no field to break the symmetry the spins never leave their starting point.
-Fix one variable to break the symmetry before solving.
-"""
-function isflipsymmetric(prob::IsingProblem{T}) where {T}
-    hmax = maximum(abs, prob.h)
-    Jmax = maximum(abs, _entries(prob.J); init = zero(T))
-    hmax ≤ sqrt(eps(T)) * Jmax
-end
 
 function Base.show(io::IO, prob::IsingProblem{T}) where {T}
     print(io, "IsingProblem{$T}: $(nvariables(prob)) variables, sense = :$(prob.sense)")

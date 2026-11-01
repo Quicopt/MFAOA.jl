@@ -3,13 +3,23 @@
 """
     Schedule(β, γ)
 
-The two parameter sequences of the algorithm, one value per layer. `β[k]` sets
-the driver rotation of layer `k`: spin `i` turns about x̂ by `2β[k]Δ[i]`.
-`γ[k]` sets the problem rotation: spin `i` turns about ẑ by `2γ[k]m[i]/s`,
-where `m[i]` is the field the spin feels and `s` is the problem's
-[`fieldscale`](@ref). The two vectors must have the same length, which is the
-number of layers `p`. [`linear_schedule`](@ref) builds the standard choice;
-any other pair of vectors can be passed directly.
+The angles that drive the algorithm, one pair `β[k]`, `γ[k]` per layer `k`.
+
+The algorithm represents each variable `σ[i]` by a unit vector in three
+dimensions. The vector's z component, between -1 and +1, is the variable's
+current value. Every vector starts at `(1, 0, 0)`, so every variable starts
+at 0, halfway between -1 and +1. Each layer `k` turns every vector `i` twice:
+
+1. about the z axis by the angle `2γ[k] m[i] / s`, where `m[i]` is the slope
+   of the objective in variable `i` at the current values, and `s` is the
+   problem's [`fieldscale`](@ref) (the opposite angle for a maximization);
+2. about the x axis by the angle `2β[k] Δ[i]`, where `Δ[i]` is 1 unless the
+   problem sets it.
+
+After the last layer, `σ[i]` is the sign of the z component. The two vectors
+`β` and `γ` must have the same length, the number of layers `p`.
+[`linear_schedule`](@ref) builds the usual choice; any other pair of vectors
+can be passed directly.
 """
 struct Schedule{T<:AbstractFloat}
     β::Vector{T}
@@ -43,13 +53,18 @@ Base.length(s::Schedule) = length(s.β)
 """
     linear_schedule(p, τ = 0.5; T = Float64)
 
-The standard linear schedule with `p` layers and time step `τ`: the problem
-weight grows as `γ[k] = τ k / p` while the driver weight shrinks as
-`β[k] = τ (1 - (k - 1) / p)`, for `k = 1:p` (Eq. 13 of the paper). The time
-step sets how far each layer rotates the spins. Because `γ` is measured in
-units of the problem's [`fieldscale`](@ref), the same `τ` suits problems of
-any size and units; `τ` between 0.25 and 0.5 works well for typical
-instances. Larger `p` makes the sweep slower and the result more stable.
+The usual schedule: over `p` layers, the angles `γ` grow and the angles `β`
+shrink linearly,
+
+    γ[k] = τ k / p,    β[k] = τ (1 - (k - 1) / p),    k = 1, …, p.
+
+This is Eq. 13 of Misra-Spieldenner et al., PRX Quantum 4, 030335 (2023).
+`τ` sets the size of the angles. Because `γ` is measured in units of the
+problem's [`fieldscale`](@ref), the same `τ` suits problems of any size and
+units; values between 0.25 and 0.5 work well on typical instances. With more
+layers, the angles change more slowly from one layer to the next. That
+usually gives a better solution, and the time of a solve grows in proportion
+to `p`.
 """
 function linear_schedule(p::Integer, τ::Real = 0.5; T::Type{<:AbstractFloat} = Float64)
     p ≥ 1 || throw(ArgumentError("need at least one layer, got p = $p"))

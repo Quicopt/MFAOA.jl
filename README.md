@@ -101,12 +101,16 @@ build the problem with `IsingProblem(h, J; scale = 1)`.
 
 ## Symmetric problems
 
-If every local field vanishes (`h == 0`), the objective does not change when
-all spins are flipped at once, and the algorithm cannot choose between the two
-mirror images: the spins never leave their starting point. `solve` throws an
-`ArgumentError` in that case; `isflipsymmetric(prob)` tests for it. Fix one
-variable to break the symmetry before solving. Max-cut is the common example:
-the cut value is invariant under exchanging the two sides.
+In Max-Cut, exchanging the two sets of a cut cuts the same edges: the
+objective does not change when every variable is flipped (`σ → -σ`, or
+`x → 1 - x`). MFAOA cannot solve such a problem as stated. It starts every
+variable halfway between its two values, where such an objective has zero
+slope in every variable, so no variable would ever move. The same holds for a
+group of variables that no term of the objective links to the others, if
+flipping the group leaves the objective unchanged. `isflipsymmetric(prob)`
+tests for such groups, and `solve` throws an `ArgumentError` that names them.
+Fix one variable of each group to either value before solving. This loses
+nothing, since flipping a group does not change the objective value.
 
 ## Repeated solves without allocation
 
@@ -155,10 +159,10 @@ added: the solver handles problems without constraints, and does not
 translate constraints into penalty terms.
 
 The termination status `LOCALLY_SOLVED` says what the algorithm delivers: a
-good configuration, without a certificate that no better one exists. A status
-of `INVALID_MODEL` means the model is outside the problem class; the reason
-is in `raw_status(model)`. The common case is a flip-symmetric objective such
-as max-cut, see above; `fix(x[1], 1)` resolves it.
+solution, without a proof that no better one exists. A status of
+`INVALID_MODEL` means that MFAOA cannot solve the model, and
+`raw_status(model)` says why and what to do. The common case is an objective
+like that of Max-Cut, see above; `fix(x[1], 1)` resolves it.
 
 Options are set as attributes:
 

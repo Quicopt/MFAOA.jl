@@ -281,14 +281,49 @@ end
     @test_throws ArgumentError solve(prob)
     @test !isflipsymmetric(IsingProblem([1e-3, 0.0], J))
     @test isflipsymmetric(IsingProblem([1e-20, 0.0], J))     # zero up to rounding
-    @test isflipsymmetric(IsingProblem([0.0], zeros(1, 1)))  # constant objective
+    # A variable that appears in no term is free to take any value.
+    constant = IsingProblem([0.0], zeros(1, 1); offset = 2)
+    @test !isflipsymmetric(constant)
+    @test solve(constant; p = 10).σ == [1]
+    @test solve(constant; p = 10).objective == 2
     # Max-cut of a triangle: cut(x) = Σ_(i,j) (x_i + x_j - 2 x_i x_j) is
     # invariant under x → 1 - x, so all fields vanish after conversion.
     Q = [0 -2 -2; 0 0 -2; 0 0 0]
     cut = QUBOProblem(Q; c = [2, 2, 2], sense = :max)
     @test IsingProblem(cut).h == zeros(3)
     @test isflipsymmetric(IsingProblem(cut))
+    @test isflipsymmetric(cut)
     @test_throws ArgumentError solve(cut)
+    message = try solve(cut); "" catch e; e.msg end
+    @test occursin("every variable is flipped (x → 1 - x)", message)
+    @test occursin("for example x[1]", message)
+
+    # Two separate pairs, a field on the first only: the second pair alone
+    # can be flipped without changing the objective, and would never move.
+    pairs = [0 -1 0 0; -1 0 0 0; 0 0 0 1; 0 0 1 0.0]
+    for J in (pairs, sparse(pairs))
+        prob = IsingProblem([0.5, 0.0, 0.0, 0.0], J)
+        @test isflipsymmetric(prob)
+        @test MFAOA._flip_groups(prob) == [[3, 4]]
+        message = try solve(prob); "" catch e; e.msg end
+        @test occursin("the variables σ[3] and σ[4] are all flipped (σ → -σ)", message)
+        @test occursin("for example σ[3]", message)
+        @test !isflipsymmetric(IsingProblem([0.5, 0.0, 0.1, 0.0], J))
+    end
+    # A variable without couplings and without field does not count.
+    lonely = IsingProblem([0.5, 0.0, 0.0], [0 1 0; 1 0 0; 0 0 0.0])
+    @test !isflipsymmetric(lonely)
+    @test solve(lonely; p = 200).σ == [-1, 1, 1]
+
+    # Three separate rings without fields, listed by their first variables.
+    ring(k) = [abs(i - j) == 1 || abs(i - j) == k - 1 ? 1.0 : 0.0 for i in 1:k, j in 1:k]
+    rings = cat(ring(3), ring(4), ring(8); dims = (1, 2))
+    groups = MFAOA._flip_groups(IsingProblem(zeros(15), rings))
+    @test groups == [1:3, 4:7, 8:15]
+    message = try solve(IsingProblem(zeros(15), rings)); "" catch e; e.msg end
+    @test occursin("these 3 groups", message)
+    @test occursin("{σ[1], σ[2], σ[3]}, {σ[4], σ[5], σ[6], σ[7]} and {σ[8], σ[9], σ[10], σ[11], σ[12], … (8 variables)}", message)
+    @test occursin("for example σ[1], σ[4] and σ[8]", message)
 end
 
 @testset "solve! allocates nothing" begin

@@ -48,7 +48,8 @@ end
     optimize!(model)
     @test termination_status(model) == INVALID_MODEL
     @test result_count(model) == 0
-    @test occursin("flipping", raw_status(model))
+    @test occursin("every variable is flipped (x → 1 - x)", raw_status(model))
+    @test occursin("with JuMP's `fix`, for example x[1].", raw_status(model))
     @test primal_status(model) == NO_SOLUTION
 
     fix(x[1], 1)
@@ -66,6 +67,30 @@ end
     @test objective_value(model) == 2
 end
 
+@testset "JuMP: every separate part needs a fixed variable" begin
+    # Max-cut of two separate edges: fixing x[1] decides the first edge only.
+    edges = [(1, 2), (3, 4)]
+    model = Model(MFAOA.Optimizer)
+    @variable(model, x[1:4], Bin)
+    @objective(model, Max, sum(x[i] + x[j] - 2x[i] * x[j] for (i, j) in edges))
+    fix(x[1], 0)
+    optimize!(model)
+    @test termination_status(model) == INVALID_MODEL
+    @test occursin("the variables x[3] and x[4] are all flipped", raw_status(model))
+    @test occursin("Fix one of them to 0 or 1 with JuMP's `fix`, for example x[3].", raw_status(model))
+    fix(x[3], 1)
+    optimize!(model)
+    @test termination_status(model) == LOCALLY_SOLVED
+    @test objective_value(model) == 2
+
+    # Anonymous variables are named by their position in the model.
+    model = Model(MFAOA.Optimizer)
+    y = @variable(model, [1:2], Bin)
+    @objective(model, Max, y[1] + y[2] - 2y[1] * y[2])
+    optimize!(model)
+    @test occursin("for example variable 1.", raw_status(model))
+end
+
 @testset "JuMP: models outside the problem class" begin
     model = Model(MFAOA.Optimizer)
     @variable(model, x, Bin)
@@ -73,7 +98,7 @@ end
     @objective(model, Min, x * y - x)
     optimize!(model)
     @test termination_status(model) == INVALID_MODEL
-    @test occursin("neither binary nor fixed", raw_status(model))
+    @test raw_status(model) == "y is neither binary nor fixed; MFAOA solves problems in binary variables only."
 
     model = Model(MFAOA.Optimizer)
     @variable(model, x[1:2], Bin)
@@ -81,7 +106,7 @@ end
     @objective(model, Min, x[1] * x[2])
     optimize!(model)
     @test termination_status(model) == INVALID_MODEL
-    @test occursin("0.5", raw_status(model))
+    @test raw_status(model) == "x[1] is fixed to 0.5; MFAOA accepts variables fixed to 0 or 1 only."
 
     model = Model(MFAOA.Optimizer)
     @variable(model, x[1:2], Bin)

@@ -4,18 +4,20 @@
     solve!(ws::Workspace, prob::IsingProblem, sched::Schedule) -> ws
 
 Run the algorithm on `prob` with the schedule `sched`, using only the memory
-in `ws`. Afterwards `ws.state` holds the final spins, `ws.m` their effective
-field and `ws.σ` the rounded solution. Allocates nothing.
+in `ws`. Afterwards `ws.state` holds the final vectors that represent the
+variables, `ws.m` the slopes of the objective there, and `ws.σ` the solution.
+Allocates nothing.
 
-Throws an `ArgumentError` when [`isflipsymmetric`](@ref)`(prob)`: the
-algorithm cannot break the symmetry itself; fix one variable first.
+Throws an `ArgumentError` when [`isflipsymmetric`](@ref)`(prob)`, naming the
+variables that the algorithm cannot move, or when `ws` was made for a
+different number of variables.
 """
 function solve!(ws::Workspace, prob::IsingProblem, sched::Schedule)
-    isflipsymmetric(prob) && throw(ArgumentError(
-        "the objective is invariant under flipping all spins (all local fields vanish), " *
-        "so the mean-field dynamics never leave the starting point; fix one variable to break the symmetry"))
-    length(ws.m) == nvariables(prob) ||
-        throw(ArgumentError("workspace is for $(length(ws.m)) variables, problem has $(nvariables(prob))"))
+    n = nvariables(prob)
+    length(ws.m) == n ||
+        throw(ArgumentError("the workspace is for $(length(ws.m)) variables, but the problem has $n"))
+    _mark_groups!(ws.group, ws.σ, prob.h, prob.J) == 0 ||
+        throw(ArgumentError(_flip_message(_flip_groups(prob), n, _ising_name, _ISING_WORDS)))
     reset!(ws.state)
     evolve!(ws, prob, sched)
     magnetization!(ws.m, prob.h, prob.J, ws.state.z)
@@ -28,14 +30,17 @@ end
 
 What [`solve`](@ref) returns.
 
-- `σ::Vector{Int8}`: the solution as spins, entries ±1.
-- `x::Vector{Int8}`: the same solution as binary variables, `x = (1 + σ) / 2`.
-- `objective`: the objective value at the solution, in the problem's sense and
-  including its constant.
-- `objective_mf`: the objective evaluated at the final continuous spins
-  (`z` components in place of `σ`). It equals `objective` when every spin has
-  reached a pole; a gap between the two means the sweep was too fast.
-- `state::SpinState`: the final spins, for inspection.
+- `σ::Vector{Int8}`: the solution in Ising form, entries -1 and +1.
+- `x::Vector{Int8}`: the same solution in QUBO form, `x = (1 + σ) / 2`,
+  entries 0 and 1.
+- `objective`: the objective value of the solution, in the problem's sense
+  and including its constant.
+- `objective_mf`: the objective at the values between -1 and +1 that the
+  algorithm ends with, before they are rounded to `σ`. It equals `objective`
+  when every value has reached -1 or +1. A large gap means that variables
+  were still undecided at the end; more layers usually close it.
+- `state::SpinState`: the final vectors that represent the variables (see
+  [`Schedule`](@ref)).
 """
 struct Result{T<:AbstractFloat}
     σ::Vector{Int8}
@@ -81,7 +86,13 @@ function solve(prob::IsingProblem{T}, sched::Schedule) where {T}
     Result{T}(σ, x, objective(prob, σ), _objective_mf(prob, ws), ws.state)
 end
 
-solve(prob::QUBOProblem, sched::Schedule) = solve(IsingProblem(prob), sched)
+function solve(prob::QUBOProblem, sched::Schedule)
+    ising = IsingProblem(prob)
+    groups = _flip_groups(ising)
+    isempty(groups) ||
+        throw(ArgumentError(_flip_message(groups, nvariables(prob), _qubo_name, _QUBO_WORDS)))
+    solve(ising, sched)
+end
 
 solve(prob::Union{IsingProblem,QUBOProblem}; p::Integer = 1000, τ::Real = 0.5) =
     solve(prob, linear_schedule(p, τ; T = eltype(prob)))

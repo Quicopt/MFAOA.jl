@@ -35,9 +35,11 @@
 """
     SpinState{T}(n)
 
-The `n` classical unit spins of the mean-field dynamics, stored as three
-vectors `x`, `y`, `z` of components. A fresh state has every spin at
-`(1, 0, 0)`, the starting point of the algorithm.
+The unit vectors in three dimensions by which the algorithm represents `n`
+variables (see [`Schedule`](@ref)), stored as three vectors `x`, `y`, `z` of
+their components. The z component of a vector is the current value of its
+variable, between -1 and +1. A fresh state has every vector at `(1, 0, 0)`,
+where the algorithm starts: every variable at 0.
 """
 struct SpinState{T<:AbstractFloat}
     x::Vector{T}
@@ -70,19 +72,22 @@ end
 """
     Workspace(prob)
 
-All memory the algorithm needs for `prob`: the spin state `state`, the field
-buffer `m` and the rounded spins `σ`. Allocate it once and reuse it across
+All memory that [`solve!`](@ref) needs for `prob`: the vectors `state` that
+represent the variables, the slopes `m` of the objective in the variables,
+the solution `σ`, and `group`, which the check of the problem before a solve
+uses (see [`isflipsymmetric`](@ref)). Allocate it once and reuse it across
 solves of problems with the same number of variables.
 """
 struct Workspace{T<:AbstractFloat}
     state::SpinState{T}
     m::Vector{T}
     σ::Vector{Int8}
+    group::Vector{Int}
 end
 
 function Workspace(prob::IsingProblem{T}) where {T}
     n = nvariables(prob)
-    Workspace{T}(SpinState{T}(n), Vector{T}(undef, n), Vector{Int8}(undef, n))
+    Workspace{T}(SpinState{T}(n), Vector{T}(undef, n), Vector{Int8}(undef, n), Vector{Int}(undef, n))
 end
 
 """
@@ -145,10 +150,12 @@ _field_unit(prob::IsingProblem{T}) where {T} = _sense_sign(prob.sense, T) / prob
 """
     step!(ws::Workspace, prob::IsingProblem, β_k, γ_k) -> ws
 
-Apply one layer to the spins in `ws.state`: compute their effective field
-into `ws.m`, rotate every spin `i` about ẑ by `2γ_k * m[i] / s` (with `s` the
-problem's [`fieldscale`](@ref), and the opposite sign for a maximization),
-then about x̂ by `2β_k * Δ[i]`. Allocates nothing.
+Apply one layer of the algorithm (see [`Schedule`](@ref)) to the vectors in
+`ws.state`. Compute the slope `m[i]` of the objective in every variable into
+`ws.m`. Then turn every vector `i` about the z axis by the angle
+`2γ_k * m[i] / s`, where `s` is the problem's [`fieldscale`](@ref) (the
+opposite angle for a maximization), and about the x axis by `2β_k * Δ[i]`.
+Allocates nothing.
 """
 function step!(ws::Workspace, prob::IsingProblem, β_k::Real, γ_k::Real)
     magnetization!(ws.m, prob.h, prob.J, ws.state.z)
@@ -159,7 +166,7 @@ end
 """
     evolve!(ws::Workspace, prob::IsingProblem, sched::Schedule) -> ws
 
-Run every layer of `sched` with [`step!`](@ref), starting from the spins in
+Run every layer of `sched` with [`step!`](@ref), starting from the vectors in
 `ws.state` as they are. Allocates nothing.
 """
 function evolve!(ws::Workspace, prob::IsingProblem, sched::Schedule)

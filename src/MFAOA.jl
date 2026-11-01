@@ -19,11 +19,13 @@ module MFAOA
 
 import MathOptInterface as MOI
 using LinearAlgebra: mul!, dot, issymmetric
-using SparseArrays: SparseMatrixCSC, sparse, spzeros, findnz, nonzeros, nnz, dropzeros!
+using SparseArrays: SparseMatrixCSC, sparse, spzeros, findnz, nonzeros, nnz, dropzeros!,
+                    rowvals, nzrange
 
 include("schedule.jl")
 include("problem.jl")
 include("kernel.jl")
+include("symmetry.jl")
 include("solve.jl")
 include("MOI_wrapper.jl")
 

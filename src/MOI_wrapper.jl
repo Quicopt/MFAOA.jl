@@ -25,7 +25,7 @@ const _RAW_ATTRIBUTES = ("p", "tau", "beta", "gamma")
 """
     MFAOA.Optimizer(; p = 1000, tau = 0.5)
 
-A MathOptInterface optimizer running the mean-field AOA, for use from JuMP:
+The MFAOA solver for JuMP (as a MathOptInterface optimizer):
 
 ```julia
 using JuMP, MFAOA
@@ -45,11 +45,12 @@ set with `set_attribute(model, name, value)`:
 - `"beta"`, `"gamma"`: an explicit [`Schedule`](@ref) as two vectors of equal
   length, used instead of the linear schedule when both are set.
 
-A solve ends with `LOCALLY_SOLVED`: the algorithm returns a good configuration
-without a certificate of optimality. `INVALID_MODEL` with an explanation in
-`raw_status(model)` means the model is outside the problem class, most often
-because its objective is invariant under flipping all variables
-(`x → 1 - x`, as in max-cut); fix one variable to break that symmetry.
+A solve ends with `LOCALLY_SOLVED`: the solver returns a solution, without
+a proof that no better one exists. `INVALID_MODEL` means that MFAOA cannot
+solve the model, and `raw_status(model)` says why and what to do. Most
+often, the objective does not change when every variable `x` is replaced by
+`1 - x`, as in Max-Cut; fixing one variable, say with `fix(x[1], 0)`, solves
+that.
 """
 mutable struct Optimizer <: MOI.AbstractOptimizer
     # options
@@ -67,6 +68,7 @@ mutable struct Optimizer <: MOI.AbstractOptimizer
     constant::Float64
     isbinary::Vector{Bool}
     fixed::Vector{Float64}          # NaN where the variable is free
+    names::Vector{String}           # "" where the model gives no name
     # results
     status::MOI.TerminationStatusCode
     raw_status::String
@@ -78,7 +80,7 @@ end
 function Optimizer(; p::Integer = 1000, tau::Real = 0.5)
     o = Optimizer(p, tau, nothing, nothing, false,
                   false, 0, MOI.FEASIBILITY_SENSE, spzeros(0, 0), Float64[], 0.0, Bool[], Float64[],
-                  MOI.OPTIMIZE_NOT_CALLED, "", Float64[], NaN, 0.0)
+                  String[], MOI.OPTIMIZE_NOT_CALLED, "", Float64[], NaN, 0.0)
     MOI.set(o, MOI.RawOptimizerAttribute("p"), p)
     MOI.set(o, MOI.RawOptimizerAttribute("tau"), tau)
     o
@@ -98,6 +100,7 @@ function MOI.empty!(o::Optimizer)
     o.constant = 0.0
     o.isbinary = Bool[]
     o.fixed = Float64[]
+    o.names = String[]
     _reset_results!(o)
     o
 end
@@ -166,8 +169,9 @@ MOI.supports_constraint(::Optimizer, ::Type{_VI}, ::Type{MOI.EqualTo{Float64}}) 
 
 MOI.supports(::Optimizer, ::MOI.ObjectiveSense) = true
 MOI.supports(::Optimizer, ::MOI.ObjectiveFunction{F}) where {F<:Union{_VI,_SAF,_SQF}} = true
-# Names are accepted and ignored (JuMP keeps them in its own cache). Any other
-# variable or constraint attribute is rejected by copy_to.
+# Variable names are kept for the messages in RawStatusString; other names are
+# accepted and ignored. Any other variable or constraint attribute is rejected
+# by copy_to.
 MOI.supports(::Optimizer, ::MOI.Name) = true
 MOI.supports(::Optimizer, ::MOI.VariableName, ::Type{_VI}) = true
 MOI.supports(::Optimizer, ::MOI.ConstraintName, ::Type{<:MOI.ConstraintIndex}) = true
@@ -228,6 +232,17 @@ function _objective_data(src::MOI.ModelLike, index_map, n::Int)
     sparse(rows, cols, vals, n, n), c, f.constant
 end
 
+"""
+    _variable_names(src, variables) -> Vector{String}
+
+The names of `variables` in `src`, with `""` for a variable without one.
+"""
+function _variable_names(src::MOI.ModelLike, variables::Vector{_VI})
+    MOI.VariableName() in MOI.get(src, MOI.ListOfVariableAttributesSet()) ||
+        return fill("", length(variables))
+    [MOI.get(src, MOI.VariableName(), vi) for vi in variables]
+end
+
 function MOI.copy_to(dest::Optimizer, src::MOI.ModelLike)
     MOI.empty!(dest)
     _check_supported(dest, src)
@@ -240,6 +255,7 @@ function MOI.copy_to(dest::Optimizer, src::MOI.ModelLike)
     dest.n = n
     dest.isbinary = falses(n)
     dest.fixed = fill(NaN, n)
+    dest.names = _variable_names(src, variables)
     for ci in MOI.get(src, MOI.ListOfConstraintIndices{_VI,MOI.ZeroOne}())
         i = index_map[MOI.get(src, MOI.ConstraintFunction(), ci)].value
         dest.isbinary[i] = true
@@ -276,6 +292,14 @@ function _invalid!(o::Optimizer, reason::String)
 end
 
 """
+    _variable_name(o::Optimizer, i) -> String
+
+How messages name variable `i`: by its name in the model, such as `x[3]`, or
+as `variable 3` if it has none.
+"""
+_variable_name(o::Optimizer, i::Int) = isempty(o.names[i]) ? "variable $i" : o.names[i]
+
+"""
     _invalid_variable(o::Optimizer) -> Union{String,Nothing}
 
 Why the model's variables put it outside the problem class (a variable that is
@@ -284,14 +308,31 @@ neither binary nor fixed, or one fixed to a value other than 0 or 1), or
 """
 function _invalid_variable(o::Optimizer)
     for i in 1:o.n
+        name = _variable_name(o, i)
         if isnan(o.fixed[i])
             o.isbinary[i] ||
-                return "variable $i is neither binary nor fixed; MFAOA solves problems in binary variables only"
+                return "$name is neither binary nor fixed; MFAOA solves problems in binary variables only."
         elseif !(o.fixed[i] == 0 || o.fixed[i] == 1)
-            return "variable $i is fixed to $(o.fixed[i]), which is not 0 or 1"
+            return "$name is fixed to $(o.fixed[i]); MFAOA accepts variables fixed to 0 or 1 only."
         end
     end
     nothing
+end
+
+# The words in which `_flip_message` explains the problem to a JuMP user.
+const _JUMP_WORDS = (flip = "x → 1 - x", start = "1/2", values = "0 or 1", fix = " with JuMP's `fix`")
+
+"""
+    _flip_status(o::Optimizer, prob, free) -> Union{String,Nothing}
+
+Why MFAOA cannot solve the model with the free variables `free`, whose
+objective is `prob`, because of a group of variables it cannot move (see
+[`isflipsymmetric`](@ref)); `nothing` if there is no such group.
+"""
+function _flip_status(o::Optimizer, prob::IsingProblem, free::Vector{Int})
+    groups = _flip_groups(prob)
+    isempty(groups) && return nothing
+    _flip_message(groups, length(free), k -> _variable_name(o, free[k]), _JUMP_WORDS)
 end
 
 """
@@ -366,13 +407,12 @@ function MOI.optimize!(o::Optimizer)
                         start)
     end
     prob = _reduced_problem(o, free)
-    isflipsymmetric(prob) && return _invalid!(o,
-        "the objective is invariant under flipping all free variables (x → 1 - x), " *
-        "so the mean-field dynamics cannot choose a side; fix one variable to break the symmetry")
+    reason = _flip_status(o, prob, free)
+    reason === nothing || return _invalid!(o, reason)
     sched = _schedule(o)
     x[free] .= solve(prob, sched).x
     _finish!(o, x, MOI.LOCALLY_SOLVED,
-             "mean-field AOA finished: $(length(free)) free variables, $(length(sched)) layers", start)
+             "MFAOA ran $(length(sched)) layers on $(length(free)) free variables.", start)
 end
 
 # --- results -----------------------------------------------------------------
