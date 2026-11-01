@@ -60,7 +60,9 @@ function _check_couplings(J::AbstractMatrix, n::Integer)
     end
     if !issymmetric(J)
         i, j = _asymmetric_pair(J)
-        throw(ArgumentError("J must be symmetric; J[$i,$j] = $(J[i, j]) but J[$j,$i] = $(J[j, i])"))
+        # At most ten interpolated pieces, so that `string` resolves statically
+        # and the constructor compiles with JuliaC's --trim.
+        throw(ArgumentError("J must be symmetric, but J[i,j] = $(J[i, j]) and J[j,i] = $(J[j, i]) at (i, j) = $((i, j))"))
     end
     nothing
 end
