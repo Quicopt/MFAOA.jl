@@ -1,24 +1,6 @@
 # solve.jl — running the algorithm on a problem.
 
 """
-    Workspace(prob)
-
-All memory [`solve!`](@ref) needs for `prob`: the spin state, the field
-buffer and the rounded spins. Allocate it once and reuse it across solves
-of problems with the same number of variables.
-"""
-struct Workspace{T<:AbstractFloat}
-    state::SpinState{T}
-    m::Vector{T}
-    σ::Vector{Int8}
-end
-
-function Workspace(prob::IsingProblem{T}) where {T}
-    n = nvariables(prob)
-    Workspace{T}(SpinState{T}(n), Vector{T}(undef, n), Vector{Int8}(undef, n))
-end
-
-"""
     solve!(ws::Workspace, prob::IsingProblem, sched::Schedule) -> ws
 
 Run the algorithm on `prob` with the schedule `sched`, using only the memory
@@ -35,9 +17,9 @@ function solve!(ws::Workspace, prob::IsingProblem, sched::Schedule)
     length(ws.m) == nvariables(prob) ||
         throw(ArgumentError("workspace is for $(length(ws.m)) variables, problem has $(nvariables(prob))"))
     reset!(ws.state)
-    evolve!(ws.state, ws.m, prob.h, prob.J, prob.Δ, sched.β, sched.γ)
+    evolve!(ws, prob, sched)
     magnetization!(ws.m, prob.h, prob.J, ws.state.z)
-    readout!(ws.σ, ws.state, ws.m)
+    readout!(ws.σ, ws.state, ws.m, prob)
     ws
 end
 
@@ -67,16 +49,19 @@ function Base.show(io::IO, r::Result{T}) where {T}
     print(io, "Result{$T}: $(length(r.σ)) variables, objective = $(r.objective)")
 end
 
-# The continuous mean-field value from the final field m = h + J z:
-# h'z + z'Jz/2 = Σᵢ zᵢ (hᵢ + mᵢ) / 2.
+"""
+    _objective_mf(prob, ws)
+
+The objective at the continuous spins `z = ws.state.z`, from their field
+`m = h + J z` in `ws.m`: `h'z + z'Jz/2 + offset = Σᵢ zᵢ (hᵢ + mᵢ) / 2 + offset`.
+"""
 function _objective_mf(prob::IsingProblem{T}, ws::Workspace{T}) where {T}
     z = ws.state.z
     E = zero(T)
     @inbounds for i in eachindex(z)
         E += z[i] * (prob.h[i] + ws.m[i])
     end
-    E = E / 2 + prob.offset
-    prob.sense === :max ? -E : E
+    E / 2 + prob.offset
 end
 
 """

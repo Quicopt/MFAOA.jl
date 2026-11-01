@@ -10,22 +10,24 @@ The solver minimizes (or maximizes) a quadratic function of binary variables.
 It accepts the problem either as a QUBO, `x' * Q * x + c' * x + constant` over
 `x ∈ {0,1}ⁿ` ([`QUBOProblem`](@ref)), or in the Ising form the algorithm works
 with natively, `h' * σ + Σ_{i<j} J[i,j] σ[i] σ[j]` over `σ ∈ {-1,+1}ⁿ`
-([`IsingProblem`](@ref)). Call [`solve`](@ref) with a [`Schedule`](@ref), or
-with the number of layers `p` and the time step `τ` of the default linear
-schedule. From JuMP, use `Model(MFAOA.Optimizer)` with binary variables and a
-quadratic objective.
+([`IsingProblem`](@ref)). The matrices can be dense or sparse. Call
+[`solve`](@ref) with a [`Schedule`](@ref), or with the number of layers `p`
+and the time step `τ` of the default linear schedule. From JuMP, use
+`Model(MFAOA.Optimizer)` with binary variables and a quadratic objective.
 """
 module MFAOA
 
 import MathOptInterface as MOI
+using LinearAlgebra: mul!, dot, issymmetric
+using SparseArrays: SparseMatrixCSC, sparse, spzeros, findnz, nonzeros, nnz, dropzeros!
 
-include("kernel.jl")
 include("schedule.jl")
 include("problem.jl")
+include("kernel.jl")
 include("solve.jl")
 include("MOI_wrapper.jl")
 
-export IsingProblem, QUBOProblem, objective, isflipsymmetric
+export IsingProblem, QUBOProblem, objective, isflipsymmetric, fieldscale
 export Schedule, linear_schedule
 export SpinState, Workspace, Result, solve, solve!, evolve!, step!
 

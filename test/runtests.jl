@@ -1,5 +1,6 @@
 using Test
 using Random
+using SparseArrays
 using MFAOA
 using MFAOA: SpinState, readout!, nvariables
 
@@ -42,13 +43,24 @@ function brute_force(prob::IsingProblem)
     best, bestσ
 end
 
-function random_ising(rng, N; Δ = nothing)
+function random_couplings(rng, N)
     J = randn(rng, N, N)
     J = (J + J') / 2
     for i in 1:N
         J[i, i] = 0
     end
-    IsingProblem(randn(rng, N), J; Δ = Δ)
+    J
+end
+
+random_ising(rng, N; Δ = nothing) = IsingProblem(randn(rng, N), random_couplings(rng, N); Δ = Δ)
+
+# A sparse problem: an open chain plus a few random long-range couplings.
+function random_sparse_ising(rng, N; Δ = nothing)
+    I = [1:(N - 1); rand(rng, 1:N, N ÷ 4)]
+    J = [2:N; rand(rng, 1:N, N ÷ 4)]
+    keep = I .!= J
+    A = sparse(I[keep], J[keep], randn(rng, count(keep)), N, N)
+    IsingProblem(randn(rng, N), A + A'; Δ = Δ)
 end
 
 alloc_solve!(ws, prob, sched) = @allocated solve!(ws, prob, sched)
@@ -84,8 +96,74 @@ end
 
     pmax = IsingProblem([1, -2], [0 3; 3 0]; offset = 10, sense = :max)
     @test objective(pmax, [1, 1]) == 1 - 2 + 3 + 10                           # reported as stated
-    @test pmax.h == [-1.0, 2.0]                                                # stored for minimization
-    @test pmax.offset == -10.0
+    @test pmax.h == [1.0, -2.0]                                                # stored as stated
+    @test pmax.offset == 10.0
+
+    h = [1.0, 2.0]
+    @test IsingProblem(h, J).h === h                                           # kept, not copied
+    @test IsingProblem(h, J).J === J
+    S = sparse(J)
+    @test IsingProblem(h, S).J === S
+    @test_throws ArgumentError IsingProblem(h, sparse([0.0 1.0; 2.0 0.0]))     # sparse, not symmetric
+    @test_throws ArgumentError IsingProblem(h, sparse([0.0 1.0; 0.0 0.0]))     # one side stored only
+    @test_throws ArgumentError IsingProblem(h, sparse([1.0 1.0; 1.0 0.0]))     # sparse, diagonal
+    @test_throws ArgumentError IsingProblem(h, J; scale = 0)
+end
+
+@testset "field scale" begin
+    h = [1.0, -2.0, 0.0]
+    J = [0.0 3.0 0.0; 3.0 0.0 -1.0; 0.0 -1.0 0.0]
+    prob = IsingProblem(h, J)
+    @test fieldscale(prob) ≈ sqrt((1 + 4 + 2 * 9 + 2 * 1) / 3)
+    @test fieldscale(IsingProblem(h, sparse(J))) ≈ fieldscale(prob)
+    @test fieldscale(IsingProblem(1000h, 1000J)) ≈ 1000 * fieldscale(prob)
+    @test fieldscale(IsingProblem(h, J; scale = 1)) == 1
+    @test fieldscale(IsingProblem([0.0], zeros(1, 1))) == 1                   # nothing to measure
+
+    # The solution does not depend on the units of the objective.
+    rng = MersenneTwister(5)
+    for make in (random_ising, random_sparse_ising)
+        p1 = make(rng, 40)
+        p1000 = IsingProblem(1000 .* p1.h, 1000 .* p1.J)
+        r1 = solve(p1; p = 200)
+        r1000 = solve(p1000; p = 200)
+        @test r1000.σ == r1.σ
+        @test r1000.state.z ≈ r1.state.z rtol = 1e-8
+        @test r1000.objective ≈ 1000 * r1.objective
+    end
+end
+
+@testset "sparse and dense couplings agree" begin
+    rng = MersenneTwister(9)
+    for Δ in (nothing, 0.5 .+ rand(rng, 30))
+        sp = random_sparse_ising(rng, 30; Δ = Δ)
+        de = IsingProblem(sp.h, Matrix(sp.J); Δ = Δ)
+        sched = linear_schedule(100)
+        rs, rd = solve(sp, sched), solve(de, sched)
+        @test rs.state.z ≈ rd.state.z atol = 1e-10
+        @test rs.σ == rd.σ
+        @test rs.objective ≈ rd.objective
+    end
+    Q = sprandn(MersenneTwister(2), 12, 12, 0.3)
+    c = randn(MersenneTwister(3), 12)
+    qs = IsingProblem(QUBOProblem(Q; c = c, constant = 1.5))
+    qd = IsingProblem(QUBOProblem(Matrix(Q); c = c, constant = 1.5))
+    @test qs.J isa SparseMatrixCSC
+    @test Matrix(qs.J) ≈ qd.J
+    @test qs.h ≈ qd.h
+    @test qs.offset ≈ qd.offset
+    x = rand(MersenneTwister(4), 0:1, 12)
+    @test objective(QUBOProblem(Q; c = c), x) ≈ objective(QUBOProblem(Matrix(Q); c = c), x)
+end
+
+@testset "maximizing E is minimizing -E" begin
+    rng = MersenneTwister(13)
+    pmin = random_sparse_ising(rng, 25)
+    pmax = IsingProblem(-pmin.h, -pmin.J; offset = 2.0, sense = :max)
+    rmin, rmax = solve(pmin; p = 300), solve(pmax; p = 300)
+    @test rmax.state.z == rmin.state.z
+    @test rmax.σ == rmin.σ
+    @test rmax.objective ≈ -rmin.objective + 2.0
 end
 
 @testset "QUBO and Ising forms agree on every x" begin
@@ -116,7 +194,8 @@ end
         prob = random_ising(rng, N; Δ = Δ)
         sched = Schedule(rand(rng, 20), rand(rng, 20))      # two independent, arbitrary schedules
         res = solve(prob, sched)
-        ref = reference_evolve(prob.h, prob.J, Δ === nothing ? ones(N) : Δ, sched.β, sched.γ)
+        ref = reference_evolve(prob.h, prob.J, Δ === nothing ? ones(N) : Δ, sched.β,
+                               sched.γ ./ fieldscale(prob))
         for i in 1:N
             n_i = [res.state.x[i], res.state.y[i], res.state.z[i]]
             @test n_i ≈ ref[i] atol = 1e-12
@@ -136,8 +215,10 @@ end
 @testset "readout breaks ties by the field" begin
     s = SpinState{Float64}([0.0, 0.0, 0.0, 0.6], [1.0, 1.0, 1.0, 0.0], [0.0, 0.0, 0.0, -0.8])
     σ = zeros(Int8, 4)
-    readout!(σ, s, [1.0, -1.0, 0.0, 5.0])
+    readout!(σ, s, [1.0, -1.0, 0.0, 5.0], IsingProblem(ones(4), zeros(4, 4)))
     @test σ == [-1, 1, 1, -1]
+    readout!(σ, s, [1.0, -1.0, 0.0, 5.0], IsingProblem(ones(4), zeros(4, 4); sense = :max))
+    @test σ == [1, -1, 1, -1]
 end
 
 @testset "agrees with QAOA.jl's mean-field evolution" begin
@@ -157,7 +238,7 @@ end
     γ = collect(τ .* ((1:p) .- 1 / 2) ./ p)
     β = collect(τ .* (1 .- (1:p) ./ p))
     β[p] = τ / (4p)
-    res = solve(IsingProblem(h, J), Schedule(β, γ))
+    res = solve(IsingProblem(h, J; scale = 1), Schedule(β, γ))   # γ in the units of h and J
     S_test = [[-0.4280189887648497, -0.57845514021309, 0.6943985858408479],
               [-0.4161436735954462, -0.1965348184395327, -0.8878054449413042],
               [-0.3151885316091266, 0.14809317283731896, -0.9374031159010826],
@@ -213,8 +294,8 @@ end
 @testset "solve! allocates nothing" begin
     rng = MersenneTwister(3)
     N = 32
-    for Δ in (nothing, 1 .+ rand(rng, N))
-        prob = random_ising(rng, N; Δ = Δ)
+    for Δ in (nothing, 1 .+ rand(rng, N)), make in (random_ising, random_sparse_ising)
+        prob = make(rng, N; Δ = Δ)
         sched = linear_schedule(50, 0.5)
         ws = Workspace(prob)
         solve!(ws, prob, sched)                 # compile

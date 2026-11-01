@@ -1,5 +1,6 @@
 import MathOptInterface as MOI
 using JuMP
+using LinearAlgebra: triu
 
 @testset "JuMP: min and max of a QUBO" begin
     model = Model(MFAOA.Optimizer)
@@ -92,6 +93,45 @@ end
     optimize!(model)
     @test termination_status(model) == OPTIMAL
     @test objective_value(model) == 0
+end
+
+@testset "JuMP: units of the objective do not matter" begin
+    # A ring of 12 variables with alternating couplings and small biases.
+    function ring_model(weight)
+        model = Model(MFAOA.Optimizer)
+        @variable(model, x[1:12], Bin)
+        @objective(model, Min, weight * (sum((-1)^i * x[i] * x[mod1(i + 1, 12)] for i in 1:12)
+                                        - sum(0.1i * x[i] for i in 1:12)))
+        optimize!(model)
+        value.(x), objective_value(model)
+    end
+    x1, v1 = ring_model(1)
+    x1000, v1000 = ring_model(1000)
+    @test x1000 == x1
+    @test v1000 ≈ 1000v1
+end
+
+@testset "JuMP: sparse and dense storage" begin
+    # The wrapper keeps the couplings sparse below a fill of 25% and dense above.
+    sparse_Q = sparse([1, 2], [2, 3], [1.0, -1.0], 10, 10)
+    @test MFAOA._coupling_storage(sparse_Q) isa SparseMatrixCSC
+    dense_Q = sparse(triu(ones(10, 10), 1))
+    @test MFAOA._coupling_storage(dense_Q) isa Matrix
+
+    # Fixing variables in a sparse model: substitution matches brute force.
+    model = Model(MFAOA.Optimizer)
+    @variable(model, x[1:8], Bin)
+    @objective(model, Max, sum(x[i] + x[i + 1] - 2x[i] * x[i + 1] for i in 1:7) + 0.5x[8])
+    fix(x[1], 1)
+    fix(x[5], 1)
+    optimize!(model)
+    @test termination_status(model) == LOCALLY_SOLVED
+    best = maximum(0:63) do bits
+        y = [1; [(bits >> k) & 1 for k in 0:2]; 1; [(bits >> k) & 1 for k in 3:5]]
+        sum(y[i] + y[i + 1] - 2y[i] * y[i + 1] for i in 1:7) + 0.5y[8]
+    end
+    @test objective_value(model) == best
+    @test value(x[1]) == 1 && value(x[5]) == 1
 end
 
 @testset "JuMP: options" begin

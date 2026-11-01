@@ -62,7 +62,7 @@ mutable struct Optimizer <: MOI.AbstractOptimizer
     has_model::Bool
     n::Int
     sense::MOI.OptimizationSense
-    Q::Matrix{Float64}
+    Q::SparseMatrixCSC{Float64,Int}  # objective x'Qx + c'x + constant
     c::Vector{Float64}
     constant::Float64
     isbinary::Vector{Bool}
@@ -77,7 +77,7 @@ end
 
 function Optimizer(; p::Integer = 1000, tau::Real = 0.5)
     o = Optimizer(p, tau, nothing, nothing, false,
-                  false, 0, MOI.FEASIBILITY_SENSE, zeros(0, 0), Float64[], 0.0, Bool[], Float64[],
+                  false, 0, MOI.FEASIBILITY_SENSE, spzeros(0, 0), Float64[], 0.0, Bool[], Float64[],
                   MOI.OPTIMIZE_NOT_CALLED, "", Float64[], NaN, 0.0)
     MOI.set(o, MOI.RawOptimizerAttribute("p"), p)
     MOI.set(o, MOI.RawOptimizerAttribute("tau"), tau)
@@ -93,7 +93,7 @@ function MOI.empty!(o::Optimizer)
     o.has_model = false
     o.n = 0
     o.sense = MOI.FEASIBILITY_SENSE
-    o.Q = zeros(0, 0)
+    o.Q = spzeros(0, 0)
     o.c = Float64[]
     o.constant = 0.0
     o.isbinary = Bool[]
@@ -184,8 +184,13 @@ end
 
 # --- copy_to: take the whole model over from JuMP's cache --------------------
 
-function MOI.copy_to(dest::Optimizer, src::MOI.ModelLike)
-    MOI.empty!(dest)
+"""
+    _check_supported(dest::Optimizer, src::MOI.ModelLike)
+
+Throw MOI's `UnsupportedConstraint` or `UnsupportedAttribute` error for the
+first constraint type or attribute in `src` that `dest` does not accept.
+"""
+function _check_supported(dest::Optimizer, src::MOI.ModelLike)
     for (F, S) in MOI.get(src, MOI.ListOfConstraintTypesPresent())
         MOI.supports_constraint(dest, F, S) || throw(MOI.UnsupportedConstraint{F,S}())
         for attr in MOI.get(src, MOI.ListOfConstraintAttributesSet{F,S}())
@@ -198,7 +203,34 @@ function MOI.copy_to(dest::Optimizer, src::MOI.ModelLike)
     for attr in MOI.get(src, MOI.ListOfVariableAttributesSet())
         MOI.supports(dest, attr, _VI) || throw(MOI.UnsupportedAttribute(attr))
     end
+    nothing
+end
 
+"""
+    _objective_data(src, index_map, n) -> (Q, c, constant)
+
+The objective of `src` as `x' * Q * x + c' * x + constant` over the `n`
+variables numbered by `index_map`, with `Q` sparse and in the user's sense.
+"""
+function _objective_data(src::MOI.ModelLike, index_map, n::Int)
+    F = MOI.get(src, MOI.ObjectiveFunctionType())
+    f = convert(_SQF, MOI.Utilities.map_indices(index_map, MOI.get(src, MOI.ObjectiveFunction{F}())))
+    c = zeros(n)
+    for t in f.affine_terms
+        c[t.variable.value] += t.coefficient
+    end
+    # MOI stores ½ x'Qx: a term (coef, i, j) means coef·xᵢxⱼ for i ≠ j and
+    # (coef/2)·xᵢ² for i == j. `sparse` adds up repeated pairs.
+    terms = f.quadratic_terms
+    rows = [t.variable_1.value for t in terms]
+    cols = [t.variable_2.value for t in terms]
+    vals = [t.variable_1 == t.variable_2 ? t.coefficient / 2 : t.coefficient for t in terms]
+    sparse(rows, cols, vals, n, n), c, f.constant
+end
+
+function MOI.copy_to(dest::Optimizer, src::MOI.ModelLike)
+    MOI.empty!(dest)
+    _check_supported(dest, src)
     variables = MOI.get(src, MOI.ListOfVariableIndices())
     n = length(variables)
     index_map = MOI.Utilities.IndexMap()
@@ -218,26 +250,11 @@ function MOI.copy_to(dest::Optimizer, src::MOI.ModelLike)
         dest.fixed[i] = MOI.get(src, MOI.ConstraintSet(), ci).value
         index_map[ci] = MOI.ConstraintIndex{_VI,MOI.EqualTo{Float64}}(i)
     end
-
     dest.sense = MOI.get(src, MOI.ObjectiveSense())
-    dest.Q = zeros(n, n)
-    dest.c = zeros(n)
-    dest.constant = 0.0
-    if dest.sense != MOI.FEASIBILITY_SENSE
-        F = MOI.get(src, MOI.ObjectiveFunctionType())
-        f = MOI.Utilities.map_indices(index_map, MOI.get(src, MOI.ObjectiveFunction{F}()))
-        q = convert(_SQF, f)
-        dest.constant = q.constant
-        for t in q.affine_terms
-            dest.c[t.variable.value] += t.coefficient
-        end
-        # MOI stores ½ x'Qx: a term (coef, i, j) means coef·xᵢxⱼ for i ≠ j and
-        # (coef/2)·xᵢ² for i == j.
-        for t in q.quadratic_terms
-            i = t.variable_1.value
-            j = t.variable_2.value
-            dest.Q[i, j] += i == j ? t.coefficient / 2 : t.coefficient
-        end
+    if dest.sense == MOI.FEASIBILITY_SENSE
+        dest.Q, dest.c, dest.constant = spzeros(n, n), zeros(n), 0.0
+    else
+        dest.Q, dest.c, dest.constant = _objective_data(src, index_map, n)
     end
     dest.has_model = true
     index_map
@@ -245,6 +262,11 @@ end
 
 # --- optimize! ---------------------------------------------------------------
 
+"""
+    _invalid!(o::Optimizer, reason)
+
+End the solve with `INVALID_MODEL`, giving `reason` as the raw status.
+"""
 function _invalid!(o::Optimizer, reason::String)
     o.status = MOI.INVALID_MODEL
     o.raw_status = reason
@@ -253,76 +275,104 @@ function _invalid!(o::Optimizer, reason::String)
     nothing
 end
 
-# x' Q x + c' x + constant for a full assignment, in the user's sense.
-function _objective_value(o::Optimizer, x::Vector{Float64})
-    v = o.constant
-    @inbounds for j in 1:o.n
-        xj = x[j]
-        iszero(xj) && continue
-        acc = o.c[j]
-        for i in 1:o.n
-            acc += o.Q[i, j] * x[i]
+"""
+    _invalid_variable(o::Optimizer) -> Union{String,Nothing}
+
+Why the model's variables put it outside the problem class (a variable that is
+neither binary nor fixed, or one fixed to a value other than 0 or 1), or
+`nothing` if they don't.
+"""
+function _invalid_variable(o::Optimizer)
+    for i in 1:o.n
+        if isnan(o.fixed[i])
+            o.isbinary[i] ||
+                return "variable $i is neither binary nor fixed; MFAOA solves problems in binary variables only"
+        elseif !(o.fixed[i] == 0 || o.fixed[i] == 1)
+            return "variable $i is fixed to $(o.fixed[i]), which is not 0 or 1"
         end
-        v += xj * acc
     end
-    v
+    nothing
+end
+
+"""
+    _objective_value(o::Optimizer, x)
+
+`x' * Q * x + c' * x + constant` for a full assignment `x`, in the user's sense.
+"""
+_objective_value(o::Optimizer, x::Vector{Float64}) = dot(x, o.Q, x) + dot(o.c, x) + o.constant
+
+# The sparse product beats a dense one (OpenBLAS) below about 25-30% fill,
+# measured on an Apple M4 for n = 500 to 2000.
+const _DENSE_FROM = 0.25
+
+"""
+    _coupling_storage(Q::SparseMatrixCSC)
+
+`Q` as the solve should store it: dense once the pairs it couples, the pattern
+of `Q + Qᵀ`, fill `_DENSE_FROM` of the matrix; sparse below that.
+"""
+function _coupling_storage(Q::SparseMatrixCSC)
+    n = size(Q, 1)
+    nnz(Q + transpose(Q)) ≥ _DENSE_FROM * n^2 ? Matrix(Q) : Q
+end
+
+"""
+    _reduced_problem(o::Optimizer, free) -> IsingProblem
+
+The objective as a function of the variables `free` alone, the others held at
+their fixed values. With `f` the free and `F` the fixed variables,
+
+    x'Qx + c'x = x_f' Q_ff x_f + (c_f + Q_fF x_F + Q_Ffᵀ x_F)' x_f + x_F' Q_FF x_F + c_F' x_F,
+
+so the fixed variables add to the linear term and to the constant.
+"""
+function _reduced_problem(o::Optimizer, free::Vector{Int})
+    fixed = findall(!isnan, o.fixed)
+    x_F = o.fixed[fixed]
+    Q = o.Q
+    c = o.c[free] + Q[free, fixed] * x_F + transpose(Q[fixed, free]) * x_F
+    constant = o.constant + dot(o.c[fixed], x_F) + dot(x_F, Q[fixed, fixed], x_F)
+    sense = o.sense == MOI.MAX_SENSE ? :max : :min
+    IsingProblem(QUBOProblem(_coupling_storage(Q[free, free]); c, constant, sense))
+end
+
+"""
+    _finish!(o::Optimizer, x, status, raw_status, start)
+
+Record the solution `x` with its objective value, the status, and the time
+since `start`.
+"""
+function _finish!(o::Optimizer, x::Vector{Float64}, status::MOI.TerminationStatusCode,
+                  raw_status::String, start::Float64)
+    o.x = x
+    o.objective_value = _objective_value(o, x)
+    o.status = status
+    o.raw_status = raw_status
+    o.solve_time = time() - start
+    nothing
 end
 
 function MOI.optimize!(o::Optimizer)
     start = time()
     _reset_results!(o)
-    for i in 1:o.n
-        if isnan(o.fixed[i])
-            o.isbinary[i] || return _invalid!(o,
-                "variable $i is neither binary nor fixed; MFAOA solves problems in binary variables only")
-        elseif !(o.fixed[i] == 0 || o.fixed[i] == 1)
-            return _invalid!(o, "variable $i is fixed to $(o.fixed[i]), which is not 0 or 1")
-        end
-    end
+    reason = _invalid_variable(o)
+    reason === nothing || return _invalid!(o, reason)
     free = findall(isnan, o.fixed)
     x = copy(o.fixed)
     if o.sense == MOI.FEASIBILITY_SENSE || isempty(free)
         x[free] .= 0.0
-        o.x = x
-        o.objective_value = _objective_value(o, x)
-        o.status = MOI.OPTIMAL
-        o.raw_status = isempty(free) ? "all variables fixed" : "feasibility problem: any assignment is a solution"
-        o.solve_time = time() - start
-        return nothing
+        return _finish!(o, x, MOI.OPTIMAL,
+                        isempty(free) ? "all variables fixed" : "feasibility problem: any assignment is a solution",
+                        start)
     end
-    # Substitute the fixed variables out: their couplings to free variables
-    # become linear terms, their mutual couplings a constant.
-    Q = o.Q[free, free]
-    c = o.c[free]
-    constant = o.constant
-    @inbounds for j in 1:o.n
-        isnan(o.fixed[j]) && continue
-        vj = o.fixed[j]
-        iszero(vj) && continue
-        constant += o.c[j] * vj
-        for (a, i) in enumerate(free)
-            c[a] += (o.Q[i, j] + o.Q[j, i]) * vj
-        end
-        for i in 1:o.n
-            isnan(o.fixed[i]) && continue
-            constant += o.Q[i, j] * o.fixed[i] * vj
-        end
-    end
-    prob = IsingProblem(QUBOProblem(Q; c = c, constant = constant,
-                                    sense = o.sense == MOI.MAX_SENSE ? :max : :min))
-    if isflipsymmetric(prob)
-        return _invalid!(o,
-            "the objective is invariant under flipping all free variables (x → 1 - x), " *
-            "so the mean-field dynamics cannot choose a side; fix one variable to break the symmetry")
-    end
-    res = solve(prob, _schedule(o))
-    x[free] .= res.x
-    o.x = x
-    o.objective_value = res.objective
-    o.status = MOI.LOCALLY_SOLVED
-    o.raw_status = "mean-field AOA finished: $(length(free)) free variables, $(length(_schedule(o))) layers"
-    o.solve_time = time() - start
-    nothing
+    prob = _reduced_problem(o, free)
+    isflipsymmetric(prob) && return _invalid!(o,
+        "the objective is invariant under flipping all free variables (x → 1 - x), " *
+        "so the mean-field dynamics cannot choose a side; fix one variable to break the symmetry")
+    sched = _schedule(o)
+    x[free] .= solve(prob, sched).x
+    _finish!(o, x, MOI.LOCALLY_SOLVED,
+             "mean-field AOA finished: $(length(free)) free variables, $(length(sched)) layers", start)
 end
 
 # --- results -----------------------------------------------------------------
