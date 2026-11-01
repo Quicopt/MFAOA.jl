@@ -91,6 +91,53 @@ end
     @test occursin("for example variable 1.", raw_status(model))
 end
 
+@testset "JuMP: bounds and integer variables" begin
+    objective(x) = 2x[1] * x[2] - 3x[2] * x[3] - x[1] - x[2] + x[3]
+    # Bounds that allow 0 and 1 change nothing.
+    model = Model(MFAOA.Optimizer)
+    @variable(model, 0 <= x[1:3] <= 1, Bin)
+    @objective(model, Min, objective(x))
+    optimize!(model)
+    @test termination_status(model) == LOCALLY_SOLVED
+    @test value.(x) == [0, 1, 1]
+    # An integer variable with bounds 0 and 1 is binary.
+    model = Model(MFAOA.Optimizer)
+    @variable(model, 0 <= y[1:3] <= 1, Int)
+    @objective(model, Min, objective(y))
+    optimize!(model)
+    @test termination_status(model) == LOCALLY_SOLVED
+    @test value.(y) == [0, 1, 1]
+    @test (VariableRef, MOI.Integer) in list_of_constraint_types(model)
+    # A bound that allows only one of 0 and 1 holds the variable there.
+    model = Model(MFAOA.Optimizer)
+    @variable(model, x[1:3], Bin)
+    set_lower_bound(x[1], 1)
+    @objective(model, Min, objective(x))
+    optimize!(model)
+    @test value.(x) == [1, 1, 1]
+    @test objective_value(model) == -2
+    set_upper_bound(x[2], 0.5)
+    set_upper_bound(x[3], 0)
+    optimize!(model)
+    @test termination_status(model) == OPTIMAL           # nothing left to solve
+    @test value.(x) == [1, 0, 0]
+    # An integer variable with more values than 0 and 1 is rejected.
+    model = Model(MFAOA.Optimizer)
+    @variable(model, 0 <= y <= 2, Int)
+    @objective(model, Min, y)
+    optimize!(model)
+    @test termination_status(model) == INVALID_MODEL
+    @test raw_status(model) == "y is neither binary nor fixed; MFAOA solves problems in binary variables only."
+    # Bounds that allow neither 0 nor 1 leave no solution.
+    model = Model(MFAOA.Optimizer)
+    @variable(model, 0.2 <= z <= 0.8, Bin)
+    @objective(model, Min, z)
+    optimize!(model)
+    @test termination_status(model) == INFEASIBLE
+    @test raw_status(model) == "The bounds 0.2 ≤ z ≤ 0.8 allow neither 0 nor 1."
+    @test result_count(model) == 0
+end
+
 @testset "JuMP: models outside the problem class" begin
     model = Model(MFAOA.Optimizer)
     @variable(model, x, Bin)

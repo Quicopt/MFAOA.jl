@@ -1,17 +1,20 @@
-# MOI_wrapper.jl — MFAOA as a MathOptInterface optimizer, which is what JuMP
-# talks to.
+# MOI_wrapper.jl — MFAOA as a MathOptInterface optimizer, for use from JuMP.
 #
 # The optimizer accepts exactly the problem class the algorithm solves: binary
 # variables, a linear or quadratic objective in either sense, and no
-# constraints other than fixing a variable to 0 or 1. Fixed variables are
-# substituted out before the solve, which is also how a user breaks the
-# flip symmetry of a problem without local fields (fix one variable).
+# constraints other than those on single variables that keep each variable
+# binary. Those are the binary and integer types, fixing, and bounds. Bounds
+# that still allow 0 and 1 are redundant and ignored. A bound that allows only
+# one of them holds the variable there, like fixing it. Held variables are
+# substituted out before the solve, which is also how a user breaks the flip
+# symmetry of a problem without local fields (fix one variable).
 #
 # Any other constraint is rejected at copy time with MOI's
 # UnsupportedConstraint error, which JuMP reports as "constraints of type …
 # are not supported". A model that is accepted but cannot be solved (a
 # continuous variable, a variable fixed to 0.5, a flip-symmetric objective)
-# ends with termination status INVALID_MODEL and the reason in
+# ends with termination status INVALID_MODEL, and one whose bounds allow a
+# variable neither 0 nor 1 with INFEASIBLE, each with the reason in
 # RawStatusString, as MOI prescribes.
 #
 # The model is not incremental: JuMP keeps it in a cache and hands it over
@@ -37,7 +40,11 @@ value.(x), objective_value(model)
 ```
 
 The model may contain binary variables, a linear or quadratic objective in
-either sense, and fixed variables (`fix(x[i], 1)`); nothing else. Options,
+either sense, and fixed variables (`fix(x[i], 1)`). Bounds on a variable are
+accepted when they allow 0 and 1, as in `0 <= x <= 1`, and integer variables
+when their bounds allow only 0 and 1. A bound that allows only one of the two
+values holds the variable there, as `fix` would. Nothing else is accepted.
+Options,
 set with `set_attribute(model, name, value)`:
 
 - `"p"`: the number of steps of the linear schedule (default 1000);
@@ -66,8 +73,12 @@ mutable struct Optimizer <: MOI.AbstractOptimizer
     Q::SparseMatrixCSC{Float64,Int}  # objective x'Qx + c'x + constant
     c::Vector{Float64}
     constant::Float64
+    constraint_types::Vector{Tuple{Type,Type}}   # as listed by the source model
     isbinary::Vector{Bool}
-    fixed::Vector{Float64}          # NaN where the variable is free
+    isinteger::Vector{Bool}
+    fixed::Vector{Float64}          # NaN where the variable is not fixed
+    lower::Vector{Float64}          # bounds, -Inf and Inf where there are none
+    upper::Vector{Float64}
     names::Vector{String}           # "" where the model gives no name
     # results
     status::MOI.TerminationStatusCode
@@ -79,7 +90,8 @@ end
 
 function Optimizer(; p::Integer = 1000, tau::Real = 0.5)
     o = Optimizer(p, tau, nothing, nothing, false,
-                  false, 0, MOI.FEASIBILITY_SENSE, spzeros(0, 0), Float64[], 0.0, Bool[], Float64[],
+                  false, 0, MOI.FEASIBILITY_SENSE, spzeros(0, 0), Float64[], 0.0,
+                  Tuple{Type,Type}[], Bool[], Bool[], Float64[], Float64[], Float64[],
                   String[], MOI.OPTIMIZE_NOT_CALLED, "", Float64[], NaN, 0.0)
     MOI.set(o, MOI.RawOptimizerAttribute("p"), p)
     MOI.set(o, MOI.RawOptimizerAttribute("tau"), tau)
@@ -98,8 +110,12 @@ function MOI.empty!(o::Optimizer)
     o.Q = spzeros(0, 0)
     o.c = Float64[]
     o.constant = 0.0
+    o.constraint_types = Tuple{Type,Type}[]
     o.isbinary = Bool[]
+    o.isinteger = Bool[]
     o.fixed = Float64[]
+    o.lower = Float64[]
+    o.upper = Float64[]
     o.names = String[]
     _reset_results!(o)
     o
@@ -164,8 +180,11 @@ end
 
 # --- what the model may contain ----------------------------------------------
 
-MOI.supports_constraint(::Optimizer, ::Type{_VI}, ::Type{MOI.ZeroOne}) = true
-MOI.supports_constraint(::Optimizer, ::Type{_VI}, ::Type{MOI.EqualTo{Float64}}) = true
+# Constraints on single variables, which keep the variables binary or hold
+# them at 0 or 1; optimize! checks which values each variable may take.
+const _VARIABLE_SETS = Union{MOI.ZeroOne,MOI.Integer,MOI.EqualTo{Float64},MOI.GreaterThan{Float64},
+                             MOI.LessThan{Float64},MOI.Interval{Float64}}
+MOI.supports_constraint(::Optimizer, ::Type{_VI}, ::Type{<:_VARIABLE_SETS}) = true
 
 MOI.supports(::Optimizer, ::MOI.ObjectiveSense) = true
 MOI.supports(::Optimizer, ::MOI.ObjectiveFunction{F}) where {F<:Union{_VI,_SAF,_SQF}} = true
@@ -179,12 +198,7 @@ MOI.supports(::Optimizer, ::MOI.ConstraintName, ::Type{<:MOI.ConstraintIndex}) =
 MOI.get(o::Optimizer, ::MOI.ObjectiveSense) = o.sense
 MOI.get(o::Optimizer, ::MOI.NumberOfVariables) = o.n
 MOI.get(o::Optimizer, ::MOI.ListOfVariableIndices) = [_VI(i) for i in 1:o.n]
-MOI.get(o::Optimizer, ::MOI.ListOfConstraintTypesPresent) = begin
-    types = Tuple{Type,Type}[]
-    any(o.isbinary) && push!(types, (_VI, MOI.ZeroOne))
-    any(!isnan, o.fixed) && push!(types, (_VI, MOI.EqualTo{Float64}))
-    types
-end
+MOI.get(o::Optimizer, ::MOI.ListOfConstraintTypesPresent) = copy(o.constraint_types)
 
 # --- copy_to: take the whole model over from JuMP's cache --------------------
 
@@ -243,9 +257,58 @@ function _variable_names(src::MOI.ModelLike, variables::Vector{_VI})
     [MOI.get(src, MOI.VariableName(), vi) for vi in variables]
 end
 
+"""
+    _variable_constraints(src, index_map, S) -> Vector{Tuple{Int,S}}
+
+The constraints of `src` that put a single variable into a set of type `S`,
+as pairs of the variable's number in `index_map` and the set. Records the
+constraints' new indices in `index_map`.
+"""
+function _variable_constraints(src::MOI.ModelLike, index_map, ::Type{S}) where {S}
+    constraints = Tuple{Int,S}[]
+    for ci in MOI.get(src, MOI.ListOfConstraintIndices{_VI,S}())
+        i = index_map[MOI.get(src, MOI.ConstraintFunction(), ci)].value
+        index_map[ci] = MOI.ConstraintIndex{_VI,S}(i)
+        push!(constraints, (i, MOI.get(src, MOI.ConstraintSet(), ci)))
+    end
+    constraints
+end
+
+"""
+    _copy_variable_constraints!(dest::Optimizer, src, index_map)
+
+Copy the type, fixing and bounds of every variable of `src` into `dest`.
+"""
+function _copy_variable_constraints!(dest::Optimizer, src::MOI.ModelLike, index_map)
+    n = dest.n
+    dest.isbinary, dest.isinteger = falses(n), falses(n)
+    dest.fixed, dest.lower, dest.upper = fill(NaN, n), fill(-Inf, n), fill(Inf, n)
+    for (i, _) in _variable_constraints(src, index_map, MOI.ZeroOne)
+        dest.isbinary[i] = true
+    end
+    for (i, _) in _variable_constraints(src, index_map, MOI.Integer)
+        dest.isinteger[i] = true
+    end
+    for (i, set) in _variable_constraints(src, index_map, MOI.EqualTo{Float64})
+        dest.fixed[i] = set.value
+    end
+    for (i, set) in _variable_constraints(src, index_map, MOI.GreaterThan{Float64})
+        dest.lower[i] = max(dest.lower[i], set.lower)
+    end
+    for (i, set) in _variable_constraints(src, index_map, MOI.LessThan{Float64})
+        dest.upper[i] = min(dest.upper[i], set.upper)
+    end
+    for (i, set) in _variable_constraints(src, index_map, MOI.Interval{Float64})
+        dest.lower[i] = max(dest.lower[i], set.lower)
+        dest.upper[i] = min(dest.upper[i], set.upper)
+    end
+    nothing
+end
+
 function MOI.copy_to(dest::Optimizer, src::MOI.ModelLike)
     MOI.empty!(dest)
     _check_supported(dest, src)
+    dest.constraint_types = MOI.get(src, MOI.ListOfConstraintTypesPresent())
     variables = MOI.get(src, MOI.ListOfVariableIndices())
     n = length(variables)
     index_map = MOI.Utilities.IndexMap()
@@ -253,19 +316,8 @@ function MOI.copy_to(dest::Optimizer, src::MOI.ModelLike)
         index_map[vi] = _VI(i)
     end
     dest.n = n
-    dest.isbinary = falses(n)
-    dest.fixed = fill(NaN, n)
     dest.names = _variable_names(src, variables)
-    for ci in MOI.get(src, MOI.ListOfConstraintIndices{_VI,MOI.ZeroOne}())
-        i = index_map[MOI.get(src, MOI.ConstraintFunction(), ci)].value
-        dest.isbinary[i] = true
-        index_map[ci] = MOI.ConstraintIndex{_VI,MOI.ZeroOne}(i)
-    end
-    for ci in MOI.get(src, MOI.ListOfConstraintIndices{_VI,MOI.EqualTo{Float64}}())
-        i = index_map[MOI.get(src, MOI.ConstraintFunction(), ci)].value
-        dest.fixed[i] = MOI.get(src, MOI.ConstraintSet(), ci).value
-        index_map[ci] = MOI.ConstraintIndex{_VI,MOI.EqualTo{Float64}}(i)
-    end
+    _copy_variable_constraints!(dest, src, index_map)
     dest.sense = MOI.get(src, MOI.ObjectiveSense())
     if dest.sense == MOI.FEASIBILITY_SENSE
         dest.Q, dest.c, dest.constant = spzeros(n, n), zeros(n), 0.0
@@ -279,12 +331,13 @@ end
 # --- optimize! ---------------------------------------------------------------
 
 """
-    _invalid!(o::Optimizer, reason)
+    _reject!(o::Optimizer, status, reason)
 
-End the solve with `INVALID_MODEL`, giving `reason` as the raw status.
+End the solve without a solution, with the termination status `status` and
+`reason` as the raw status.
 """
-function _invalid!(o::Optimizer, reason::String)
-    o.status = MOI.INVALID_MODEL
+function _reject!(o::Optimizer, status::MOI.TerminationStatusCode, reason::String)
+    o.status = status
     o.raw_status = reason
     o.x = Float64[]
     o.objective_value = NaN
@@ -294,29 +347,47 @@ end
 """
     _variable_name(o::Optimizer, i) -> String
 
-How messages name variable `i`: by its name in the model, such as `x[3]`, or
-as `variable 3` if it has none.
+The name of variable `i` in messages: its name in the model, such as `x[3]`,
+or `variable 3` if it has none.
 """
 _variable_name(o::Optimizer, i::Int) = isempty(o.names[i]) ? "variable $i" : o.names[i]
 
 """
-    _invalid_variable(o::Optimizer) -> Union{String,Nothing}
+    _isbinary(o::Optimizer, i) -> Bool
 
-Why the model's variables put it outside the problem class (a variable that is
-neither binary nor fixed, or one fixed to a value other than 0 or 1), or
-`nothing` if they don't.
+`true` when variable `i` can take no values other than 0 and 1: it is binary,
+or it is an integer variable with bounds strictly between -1 and 2.
 """
-function _invalid_variable(o::Optimizer)
-    for i in 1:o.n
-        name = _variable_name(o, i)
-        if isnan(o.fixed[i])
-            o.isbinary[i] ||
-                return "$name is neither binary nor fixed; MFAOA solves problems in binary variables only."
-        elseif !(o.fixed[i] == 0 || o.fixed[i] == 1)
-            return "$name is fixed to $(o.fixed[i]); MFAOA accepts variables fixed to 0 or 1 only."
-        end
+_isbinary(o::Optimizer, i::Int) =
+    o.isbinary[i] || (o.isinteger[i] && o.lower[i] > -1 && o.upper[i] < 2)
+
+"""
+    _held_value(o::Optimizer, i) -> Union{Float64,Tuple{MOI.TerminationStatusCode,String}}
+
+The value at which variable `i` is held: 0 or 1 when it is fixed, or when its
+bounds allow only that value, and `NaN` when it is free to be 0 or 1. For a
+variable that rules out a solve, the termination status and the reason
+instead: `INVALID_MODEL` when the variable may take other values than 0 and 1,
+`INFEASIBLE` when its fixing or bounds leave it no value.
+"""
+function _held_value(o::Optimizer, i::Int)
+    name = _variable_name(o, i)
+    lower, upper = o.lower[i], o.upper[i]
+    if !isnan(o.fixed[i])
+        value = o.fixed[i]
+        value == 0 || value == 1 ||
+            return (MOI.INVALID_MODEL, "$name is fixed to $value; MFAOA accepts variables fixed to 0 or 1 only.")
+        lower ≤ value ≤ upper ||
+            return (MOI.INFEASIBLE, "$name is fixed to $value, but its bounds require $lower ≤ $name ≤ $upper.")
+        return value
     end
-    nothing
+    _isbinary(o, i) ||
+        return (MOI.INVALID_MODEL, "$name is neither binary nor fixed; MFAOA solves problems in binary variables only.")
+    allows_0, allows_1 = lower ≤ 0 ≤ upper, lower ≤ 1 ≤ upper
+    allows_0 && allows_1 && return NaN
+    allows_0 && return 0.0
+    allows_1 && return 1.0
+    (MOI.INFEASIBLE, "The bounds $lower ≤ $name ≤ $upper allow neither 0 nor 1.")
 end
 
 # The words in which `_flip_message` explains the problem to a JuMP user.
@@ -325,9 +396,10 @@ const _JUMP_WORDS = (flip = "x → 1 - x", start = "1/2", values = "0 or 1", fix
 """
     _flip_status(o::Optimizer, prob, free) -> Union{String,Nothing}
 
-Why MFAOA cannot solve the model with the free variables `free`, whose
-objective is `prob`, because of a group of variables it cannot move (see
-[`isflipsymmetric`](@ref)); `nothing` if there is no such group.
+The raw status for a model that MFAOA cannot solve because of a group of
+variables it cannot move (see [`isflipsymmetric`](@ref)), or `nothing` if
+there is no such group. `free` are the model's free variables, and `prob` is
+the objective in them.
 """
 function _flip_status(o::Optimizer, prob::IsingProblem, free::Vector{Int})
     groups = _flip_groups(prob)
@@ -358,21 +430,23 @@ function _coupling_storage(Q::SparseMatrixCSC)
 end
 
 """
-    _reduced_problem(o::Optimizer, free) -> IsingProblem
+    _reduced_problem(o::Optimizer, x) -> IsingProblem
 
-The objective as a function of the variables `free` alone, the others held at
-their fixed values. With `f` the free and `F` the fixed variables,
+The objective as a function of the free variables alone, those with
+`x[i] = NaN`, the others held at their values in `x`. With `f` the free and
+`F` the held variables,
 
     x'Qx + c'x = x_f' Q_ff x_f + (c_f + Q_fF x_F + Q_Ffᵀ x_F)' x_f + x_F' Q_FF x_F + c_F' x_F,
 
-so the fixed variables add to the linear term and to the constant.
+so the held variables add to the linear term and to the constant.
 """
-function _reduced_problem(o::Optimizer, free::Vector{Int})
-    fixed = findall(!isnan, o.fixed)
-    x_F = o.fixed[fixed]
+function _reduced_problem(o::Optimizer, x::Vector{Float64})
+    free = findall(isnan, x)
+    held = findall(!isnan, x)
+    x_F = x[held]
     Q = o.Q
-    c = o.c[free] + Q[free, fixed] * x_F + transpose(Q[fixed, free]) * x_F
-    constant = o.constant + dot(o.c[fixed], x_F) + dot(x_F, Q[fixed, fixed], x_F)
+    c = o.c[free] + Q[free, held] * x_F + transpose(Q[held, free]) * x_F
+    constant = o.constant + dot(o.c[held], x_F) + dot(x_F, Q[held, held], x_F)
     sense = o.sense == MOI.MAX_SENSE ? :max : :min
     IsingProblem(QUBOProblem(_coupling_storage(Q[free, free]); c, constant, sense))
 end
@@ -396,19 +470,22 @@ end
 function MOI.optimize!(o::Optimizer)
     start = time()
     _reset_results!(o)
-    reason = _invalid_variable(o)
-    reason === nothing || return _invalid!(o, reason)
-    free = findall(isnan, o.fixed)
-    x = copy(o.fixed)
+    x = Vector{Float64}(undef, o.n)
+    for i in 1:o.n
+        value = _held_value(o, i)
+        value isa Float64 || return _reject!(o, value...)
+        x[i] = value
+    end
+    free = findall(isnan, x)
     if o.sense == MOI.FEASIBILITY_SENSE || isempty(free)
         x[free] .= 0.0
         return _finish!(o, x, MOI.OPTIMAL,
                         isempty(free) ? "all variables fixed" : "feasibility problem: any assignment is a solution",
                         start)
     end
-    prob = _reduced_problem(o, free)
+    prob = _reduced_problem(o, x)
     reason = _flip_status(o, prob, free)
-    reason === nothing || return _invalid!(o, reason)
+    reason === nothing || return _reject!(o, MOI.INVALID_MODEL, reason)
     sched = _schedule(o)
     x[free] .= solve(prob, sched).x
     _finish!(o, x, MOI.LOCALLY_SOLVED,
