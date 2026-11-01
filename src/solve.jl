@@ -28,7 +28,7 @@ end
 """
     Result
 
-What [`solve`](@ref) returns.
+The result of [`solve`](@ref), with the fields
 
 - `σ::Vector{Int8}`: the solution in Ising form, entries -1 and +1.
 - `x::Vector{Int8}`: the same solution in QUBO form, `x = (1 + σ) / 2`,

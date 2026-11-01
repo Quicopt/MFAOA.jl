@@ -270,13 +270,13 @@ end
 """
     _ising_name(i)
 
-How messages name variable `i` of an [`IsingProblem`](@ref).
+The name of variable `i` of an [`IsingProblem`](@ref) in messages.
 """
 _ising_name(i::Int) = "σ[$i]"
 
 """
     _qubo_name(i)
 
-How messages name variable `i` of a [`QUBOProblem`](@ref).
+The name of variable `i` of a [`QUBOProblem`](@ref) in messages.
 """
 _qubo_name(i::Int) = "x[$i]"

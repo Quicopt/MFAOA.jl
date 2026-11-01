@@ -94,8 +94,8 @@ end
     magnetization!(m, h, J, z) -> m
 
 The effective field `m = h + J * z`, computed in place by `mul!`, so a dense
-`J` goes to BLAS and a sparse one to the sparse product. This is the one
-operation of each step whose cost grows faster than `n`.
+`J` goes to BLAS and a sparse one to the sparse product. Of the work in a
+step, only this product costs more than a fixed amount per variable.
 """
 magnetization!(m::AbstractVector, h::AbstractVector, J::AbstractMatrix, z::AbstractVector) =
     mul!(copyto!(m, h), J, z, true, true)
@@ -105,8 +105,8 @@ magnetization!(m::AbstractVector, h::AbstractVector, J::AbstractMatrix, z::Abstr
 
 Rotate every spin `i` about ẑ by `2γ * m[i]`, then about x̂ by `2β * Δ[i]`;
 `Δ = nothing` stands for `Δ[i] = 1`, which shares one driver angle among all
-spins. Here `γ` already contains the factor that converts the field into the
-problem's units and sense (see [`step!`](@ref)).
+spins. The angle `γ` already contains the factor that converts the field into
+the problem's units and sense (see [`step!`](@ref)).
 """
 function rotate!(s::SpinState, m::AbstractVector, γ::Real, β::Real, Δ::AbstractVector)
     @inbounds for i in eachindex(m)

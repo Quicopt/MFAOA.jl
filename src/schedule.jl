@@ -58,7 +58,8 @@ shrink linearly,
 
     γ[k] = τ k / p,    β[k] = τ (1 - (k - 1) / p),    k = 1, …, p.
 
-This is Eq. 13 of Misra-Spieldenner et al., PRX Quantum 4, 030335 (2023).
+The schedule is Eq. 13 of Misra-Spieldenner et al., PRX Quantum 4, 030335
+(2023).
 `τ` sets the size of the angles. Because `γ` is measured in units of the
 problem's [`fieldscale`](@ref), the same `τ` suits problems of any size and
 units; values between 0.25 and 0.5 work well on typical instances. With more
