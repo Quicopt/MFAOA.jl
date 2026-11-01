@@ -91,7 +91,46 @@ solve!(ws, ising, sched)
 ws.σ           # the solution as spins, ±1
 ```
 
+## From JuMP
+
+`MFAOA.Optimizer` is a [MathOptInterface](https://jump.dev/MathOptInterface.jl/stable/)
+optimizer, so a model written in JuMP can be handed to it directly:
+
+```julia
+using JuMP, MFAOA
+
+model = Model(MFAOA.Optimizer)
+@variable(model, x[1:3], Bin)
+@objective(model, Min, 2x[1]*x[2] - 3x[2]*x[3] - x[1] - x[2] + x[3])
+optimize!(model)
+
+termination_status(model)   # LOCALLY_SOLVED
+value.(x)                   # [0.0, 1.0, 1.0]
+objective_value(model)      # -3.0
+```
+
+The model may contain binary variables, a linear or quadratic objective to
+minimize or maximize, and fixed variables (`fix(x[1], 1)`), which are
+substituted out before the solve. Any other constraint is rejected when it is
+added: the solver handles problems without constraints, and does not
+translate constraints into penalty terms.
+
+The termination status `LOCALLY_SOLVED` says what the algorithm delivers: a
+good configuration, without a certificate that no better one exists. A status
+of `INVALID_MODEL` means the model is outside the problem class; the reason
+is in `raw_status(model)`. The common case is a flip-symmetric objective such
+as max-cut, see above; `fix(x[1], 1)` resolves it.
+
+Options are set as attributes:
+
+```julia
+set_attribute(model, "p", 5000)       # layers of the linear schedule (default 1000)
+set_attribute(model, "tau", 0.4)      # its time step (default 0.5)
+set_attribute(model, "beta", β)       # an explicit schedule, used when both
+set_attribute(model, "gamma", γ)      # "beta" and "gamma" are set
+```
+
 ## Status
 
-Version 0.1: the algorithm, the problem types and the schedule. A JuMP
-interface (via MathOptInterface) is next.
+Version 0.1: the algorithm, the problem types, the schedule, and the JuMP
+interface.

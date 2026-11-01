@@ -223,6 +223,8 @@ end
     end
 end
 
+include("MOI_wrapper.jl")
+
 @testset "solve defaults and Result" begin
     prob = IsingProblem([-1.0, 0.5], [0.0 -0.3; -0.3 0.0])
     res = solve(prob)                            # p = 1000, τ = 0.5
