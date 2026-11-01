@@ -4,3 +4,4 @@ Manifest.toml
 *.jl.mem
 docs/build/
 .DS_Store
+/docs/gset/
