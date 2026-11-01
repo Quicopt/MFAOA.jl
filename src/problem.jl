@@ -56,7 +56,7 @@ function _check_couplings(J::AbstractMatrix, n::Integer)
         throw(ArgumentError("J must be $(n)×$(n) to match h, got $(size(J))"))
     for i in 1:n
         iszero(J[i, i]) ||
-            throw(ArgumentError("J must have a zero diagonal; J[$i,$i] = $(J[i, i]) is a constant (σ² = 1), add it to offset"))
+            throw(ArgumentError("J must be zero on the diagonal, but J[$i,$i] = $(J[i, i]). Since σ[i]^2 = 1, a diagonal entry only adds a constant: add it to offset instead."))
     end
     if !issymmetric(J)
         i, j = _asymmetric_pair(J)
