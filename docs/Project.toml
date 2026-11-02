@@ -13,5 +13,6 @@ MFAOA = {path = ".."}
 Documenter = "1"
 Downloads = "1.6"
 JuMP = "1"
+Printf = "1.11"
 SparseArrays = "1.11"
 julia = "1.11"
