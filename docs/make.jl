@@ -43,7 +43,8 @@ makedocs(;
     workdir = GSET_DIR,
     format = Documenter.HTML(; prettyurls = get(ENV, "CI", nothing) == "true",
                              canonical = "https://quicopt.github.io/MFAOA.jl/stable/",
-                             edit_link = "main"),
+                             edit_link = "main",
+                             sidebar_sitename = false),   # the logo already shows the name
     pages = [
         "Home" => "index.md",
         "Tutorial: Max-Cut on Gset" => "tutorials/maxcut_gset.md",

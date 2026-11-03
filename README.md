@@ -1,4 +1,9 @@
-# MFAOA.jl
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/src/assets/logo-dark.svg">
+    <img alt="MFAOA.jl" src="docs/src/assets/logo.svg" width="300">
+  </picture>
+</p>
 
 [![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://quicopt.github.io/MFAOA.jl/stable/)
 [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://quicopt.github.io/MFAOA.jl/dev/)
