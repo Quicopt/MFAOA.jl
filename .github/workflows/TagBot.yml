@@ -11,10 +11,7 @@ jobs:
     steps:
       - uses: JuliaRegistries/TagBot@v1
         with:
+          # A tag created with GITHUB_TOKEN starts no workflow. To publish the
+          # docs of a release, run the CI workflow on its tag by hand:
+          # gh workflow run CI.yml --ref vX.Y.Z
           token: ${{ secrets.GITHUB_TOKEN }}
-          # A tag pushed with the deploy key, unlike one pushed with
-          # GITHUB_TOKEN, starts the CI workflow, which publishes the docs of
-          # the release. For commits that modify workflow files, the key
-          # enables tagging, but the release has to be created by hand. See
-          # https://github.com/JuliaRegistries/TagBot#commits-that-modify-workflow-files
-          ssh: ${{ secrets.DOCUMENTER_KEY }}
