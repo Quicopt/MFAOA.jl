@@ -1,8 +1,15 @@
-<p align="center">
+<p>
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/src/assets/logo-dark.svg">
-    <img alt="MFAOA.jl" src="docs/src/assets/logo.svg" width="300">
+    <img alt="MFAOA.jl" src="docs/src/assets/logo.svg" width="240" align="middle">
   </picture>
+  &emsp;&emsp;
+  <a href="https://quicopt.com">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset=".github/images/quicopt-logo-dark.svg">
+      <img alt="Quicopt" src=".github/images/quicopt-logo.svg" width="300" align="middle">
+    </picture>
+  </a>
 </p>
 
 [![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://quicopt.github.io/MFAOA.jl/stable/)
