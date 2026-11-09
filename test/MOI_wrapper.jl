@@ -242,16 +242,46 @@ end
         MFAOA.Optimizer(),
     )
     model = MOI.Bridges.full_bridge_optimizer(optimizer, Float64)
+    MOI.set(model, MOI.Silent(), true)
     config = MOI.Test.Config(;
         atol = 1e-6, rtol = 1e-6,
+        # MFAOA returns a solution without a proof that it is optimal.
         optimal_status = MOI.LOCALLY_SOLVED,
+        # MFAOA computes no duals, no basis and no bound on the optimal value.
         exclude = Any[MOI.ConstraintDual, MOI.DualObjectiveValue, MOI.ConstraintBasisStatus,
-                      MOI.VariableBasisStatus, MOI.ObjectiveBound, MOI.ConstraintName,
-                      MOI.VariableName, MOI.delete],
+                      MOI.VariableBasisStatus, MOI.ObjectiveBound],
     )
-    MOI.Test.runtests(model, config;
-        include = ["test_attribute_", "test_model_", "test_basic_VariableIndex_ZeroOne",
-                   "test_basic_VariableIndex_EqualTo"],
-        exclude = String[],
-    )
+    MOI.Test.runtests(model, config; exclude = [
+        # MFAOA solves problems in binary variables only, and returns INVALID_MODEL
+        # for these tests. They use continuous variables ...
+        r"^test_linear_variable_open_intervals$",
+        r"^test_modification_coef_scalar_objective$",
+        r"^test_modification_const_scalar_objective$",
+        r"^test_modification_delete_variable_with_single_variable_obj$",
+        r"^test_modification_delete_variables_in_a_batch$",
+        r"^test_modification_set_singlevariable_lessthan$",
+        r"^test_modification_transform_singlevariable_lessthan$",
+        r"^test_objective_FEASIBILITY_SENSE_clears_objective$",
+        r"^test_objective_ObjectiveFunction_blank$",
+        r"^test_objective_ObjectiveFunction_constant$",
+        r"^test_objective_ObjectiveFunction_duplicate_terms$",
+        r"^test_objective_ObjectiveFunction_VariableIndex$",
+        r"^test_objective_qp_ObjectiveFunction_edge_cases$",
+        r"^test_objective_qp_ObjectiveFunction_zero_ofdiag$",
+        r"^test_solve_optimize_twice$",
+        r"^test_solve_result_index$",
+        r"^test_solve_TerminationStatus_DUAL_INFEASIBLE$",
+        r"^test_variable_solve_with_lowerbound$",
+        r"^test_variable_solve_with_upperbound$",
+        # ... or integer variables with a single bound, which can take values
+        # other than 0 and 1.
+        r"^test_variable_solve_Integer_with_lower_bound$",
+        r"^test_variable_solve_Integer_with_upper_bound$",
+        # In these tests the bounds fix every variable. With nothing left to
+        # search, MFAOA returns OPTIMAL instead of LOCALLY_SOLVED.
+        r"^test_constraint_ZeroOne_bounds_2$",
+        r"^test_variable_solve_ZeroOne_with_0_upper_bound$",
+        r"^test_variable_solve_ZeroOne_with_1_lower_bound$",
+        r"^test_variable_solve_ZeroOne_with_bounds_then_delete$",
+    ])
 end
