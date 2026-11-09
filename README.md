@@ -1,13 +1,13 @@
 <p>
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/src/assets/logo-dark.svg">
-    <img alt="MFAOA.jl" src="docs/src/assets/logo.svg" width="240" align="middle">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Quicopt/MFAOA.jl/main/docs/src/assets/logo-dark.svg">
+    <img alt="MFAOA.jl" src="https://raw.githubusercontent.com/Quicopt/MFAOA.jl/main/docs/src/assets/logo.svg" width="240" align="middle">
   </picture>
   &emsp;&emsp;
   <a href="https://quicopt.com">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset=".github/images/quicopt-logo-dark.svg">
-      <img alt="Quicopt" src=".github/images/quicopt-logo.svg" width="300" align="middle">
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Quicopt/MFAOA.jl/main/.github/images/quicopt-logo-dark.svg">
+      <img alt="Quicopt" src="https://raw.githubusercontent.com/Quicopt/MFAOA.jl/main/.github/images/quicopt-logo.svg" width="300" align="middle">
     </picture>
   </a>
 </p>
@@ -16,7 +16,7 @@
 [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://quicopt.github.io/MFAOA.jl/dev/)
 [![Build Status](https://github.com/Quicopt/MFAOA.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/Quicopt/MFAOA.jl/actions/workflows/CI.yml?query=branch%3Amain)
 [![Coverage](https://codecov.io/gh/Quicopt/MFAOA.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/Quicopt/MFAOA.jl)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/Quicopt/MFAOA.jl/blob/main/LICENSE)
 
 MFAOA.jl solves binary quadratic programs without constraints: it minimizes
 or maximizes `x' * Q * x + c' * x + constant` over vectors `x` of zeros and
@@ -27,12 +27,11 @@ that no better one exists.
 
 ## Installation
 
-MFAOA.jl needs Julia 1.10 or later. It is not in the General registry yet,
-so add it from its repository:
+MFAOA.jl needs Julia 1.10 or later. Install it with Julia's package manager:
 
 ```julia
 using Pkg
-Pkg.add(url = "https://github.com/Quicopt/MFAOA.jl")
+Pkg.add("MFAOA")
 ```
 
 The JuMP example below also needs JuMP: `Pkg.add("JuMP")`.
@@ -85,6 +84,15 @@ julia --project=docs docs/make.jl
 
 Then open `docs/build/index.html`. The first build downloads the five Gset
 graphs that the tutorial uses.
+
+## Getting help
+
+Report bugs and ask questions in a
+[GitHub issue](https://github.com/Quicopt/MFAOA.jl/issues). Questions about
+MFAOA in JuMP models can also go to the
+[`#jump-dev` channel of the Julia Slack](https://jump.dev/chatroom/). To reach
+the developers directly, use the contact section of
+[quicopt.com](https://quicopt.com/#contact).
 
 ## Reference
 
@@ -150,6 +158,11 @@ introduced the algorithm:
 }
 ```
 
+## Affiliation
+
+MFAOA.jl is developed and maintained by Tim Bode at
+[Forschungszentrum Jülich](https://www.fz-juelich.de/en).
+
 ## License
 
-MFAOA.jl is available under the Apache License 2.0; see [LICENSE](LICENSE).
+MFAOA.jl is available under the Apache License 2.0; see [LICENSE](https://github.com/Quicopt/MFAOA.jl/blob/main/LICENSE).

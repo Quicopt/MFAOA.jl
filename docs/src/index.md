@@ -14,12 +14,11 @@ that no better one exists.
 
 ## Installation
 
-MFAOA.jl needs Julia 1.10 or later. It is not in the General registry yet,
-so add it from its repository:
+MFAOA.jl needs Julia 1.10 or later. Install it with Julia's package manager:
 
 ```julia
 using Pkg
-Pkg.add(url = "https://github.com/Quicopt/MFAOA.jl")
+Pkg.add("MFAOA")
 ```
 
 The example below also needs JuMP: `Pkg.add("JuMP")`.
