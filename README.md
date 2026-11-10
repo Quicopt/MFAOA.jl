@@ -12,8 +12,8 @@
   </a>
 </p>
 
-[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://quicopt.github.io/MFAOA.jl/stable/)
-[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://quicopt.github.io/MFAOA.jl/dev/)
+[![stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://quicopt.github.io/MFAOA.jl/stable/)
+[![dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://quicopt.github.io/MFAOA.jl/dev/)
 [![Build Status](https://github.com/Quicopt/MFAOA.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/Quicopt/MFAOA.jl/actions/workflows/CI.yml?query=branch%3Amain)
 [![Coverage](https://codecov.io/gh/Quicopt/MFAOA.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/Quicopt/MFAOA.jl)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/Quicopt/MFAOA.jl/blob/main/LICENSE)
@@ -124,7 +124,7 @@ prove a limit on the solutions it can reach. All three are preprints on arXiv.
   Keeps the steps of the mean-field AOA, but learns their settings and the
   starting point of the variables from a set of random training problems,
   instead of fixing them in advance. The paper tests the learned settings
-  on Max-Cut on random 3-regular graphs and on the Sherrington–Kirkpatrick
+  on Max-Cut on random 3-regular graphs and on the Sherrington-Kirkpatrick
   model, in which every pair of variables is coupled with a random weight.
 - M. Goh and T. Müller, *The overlap gap property: Separating quantum and
   quantum-inspired approximate optimization algorithms*,
