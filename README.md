@@ -12,10 +12,10 @@
   </a>
 </p>
 
-| **Documentation** | **Paper** |
-|:-----------------:|:---------:|
-| [![stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://quicopt.github.io/MFAOA.jl/stable/)[![dev](https://img.shields.io/badge/docs-dev-green.svg)](https://quicopt.github.io/MFAOA.jl/dev/) | [![Journal](https://img.shields.io/badge/Journal-PRX%20Quantum-b31b1b.svg)](https://doi.org/10.1103/PRXQuantum.4.030335)[![arXiv](https://img.shields.io/badge/arXiv-2303.00329-ca5f5f.svg)](https://arxiv.org/abs/2303.00329) |
-
+[![stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://quicopt.github.io/MFAOA.jl/stable/)
+[![dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://quicopt.github.io/MFAOA.jl/dev/)
+[![Journal](https://img.shields.io/badge/Journal-PRX%20Quantum-b31b1b.svg)](https://doi.org/10.1103/PRXQuantum.4.030335)
+[![arXiv](https://img.shields.io/badge/arXiv-2303.00329-ca5f5f.svg)](https://arxiv.org/abs/2303.00329)
 [![Build Status](https://github.com/Quicopt/MFAOA.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/Quicopt/MFAOA.jl/actions/workflows/CI.yml?query=branch%3Amain)
 [![Coverage](https://codecov.io/gh/Quicopt/MFAOA.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/Quicopt/MFAOA.jl)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/Quicopt/MFAOA.jl/blob/main/LICENSE)
